@@ -22,9 +22,12 @@ npm run lint         # ESLint
 npm run typecheck    # tsc --noEmit
 npm test             # 단위 테스트 (Vitest, 인프라 불필요)
 npm run test:db      # RLS·RPC 통합 테스트 (npx supabase start 필요)
-npm run test:e2e     # Playwright (로컬 Supabase + 빌드 필요)
+npm run test:e2e     # Playwright (로컬 Supabase 필요. .next-e2e 에 따로 빌드해 실행)
 npm run build        # 프로덕션 빌드
+npm run seed         # 로컬 Supabase 에 가상의 부부 데이터 생성 (계정 정보 출력)
 ```
+
+로컬 Supabase: `npx supabase start` (Docker 필요). 스키마를 바꿨으면 `npx supabase db reset` 으로 처음부터 다시 적용해 확인한다.
 
 변경 후에는 `lint`, `typecheck`, `test`, `build`가 모두 통과해야 한다.
 
@@ -38,11 +41,15 @@ npm run build        # 프로덕션 빌드
 - 계좌 간 이동·공용통장 납입·적금 납입을 지출로 집계하지 않는다. 비현금 복지를 수입·자산에 넣지 않는다.
 - "미확인"(값 없음)과 0원을 구분한다. 미확인을 0이나 계획값으로 조용히 채우지 않는다.
 - 마감된 달은 `months.summary`만 보여 준다. 현재 설정으로 다시 계산하지 않는다.
+- 미확인 항목이 남은 달(`report.complete === false`)의 수입·소비·저축은 잠정값이다. 결과처럼 보여 주지 말고 "정산 전"으로 표시한다.
+- 스냅샷은 월말 잔액이다. 달이 끝나기 전에는 마감할 수 없다.
 
 ### 데이터와 보안
 
 - DB 접근은 `src/lib/data`를 거친다. 컴포넌트에서 `supabase.from(...)`을 직접 호출하지 않는다.
 - 수정은 읽었던 `version`을 함께 보낸다(`updateRow`). 충돌(`ConflictError`)은 사용자에게 알리고 다시 읽는다.
+- 가구 데이터(`HouseholdData`)는 불변으로 다룬다. 값이 바뀌면 재조회로 새 객체를 받는다(파생 계산 캐시가 객체 단위다).
+- 화면에서 쓸 값은 `src/lib/data/derive.ts`(reportFor, planForMonth, currentPosition, history …)에서 가져온다.
 - 새 테이블에는 `household_id`, RLS 정책, 명시적 `grant`를 반드시 넣고 `tests/db`에 접근 권한 테스트를 추가한다.
 - 금융 데이터를 `localStorage`·IndexedDB·서비스 워커 캐시·URL·로그에 남기지 않는다.
 - 비밀키(`service_role`, `sb_secret_*`)를 클라이언트 코드나 `NEXT_PUBLIC_*`에 넣지 않는다. `.env*`는 커밋하지 않는다.
@@ -60,6 +67,7 @@ npm run build        # 프로덕션 빌드
 
 - 화면을 만들기 전에 [docs/ui-guide.md](docs/ui-guide.md)를 읽는다(토큰, 컴포넌트별 props, 언제 무엇을 쓰는지). 실제 모습은 개발 서버의 `/dev/kit`.
 - 기본 컴포넌트는 `src/components/ui`, 공용 조합은 `src/components`, 화면 전용은 `src/features/<기능>`.
+- `(app)` 아래 `page.tsx`는 `metadata`와 `export const instant = false`만 두고 본문은 features 의 클라이언트 컴포넌트를 렌더링한다.
 - 색·간격·반경은 `globals.css`의 토큰만 쓴다. 임의의 hex 색을 쓰지 않는다. 라이트/다크 모두 확인한다.
 - 모바일(360px)에서 먼저 확인한다. 가로 스크롤이 생기면 안 된다. 터치 대상은 44px 이상.
 - 금액에는 `tabular-nums`를 쓴다. 숫자가 주인공이고 장식은 최소화한다.

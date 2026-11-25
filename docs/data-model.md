@@ -35,6 +35,9 @@
 새 유형은 마이그레이션의 check 제약과 `src/lib/finance/meta.ts`의 `ASSET_KINDS`에 한 줄씩 추가하면 된다.
 
 `liabilities.kind`: `installment` 무이자 할부 / `amortized` 원리금균등 / `equal_principal` 원금균등 / `bullet` 만기일시 / `interest_only` 원금 유지 차용금.
+최초 원금은 0보다 커야 하고, 이자 있는 대출(원리금균등·원금균등·만기일시)은 기간과 첫 납부 월이 필수다. 원금이 없는 정기 지급은 `plan_items`의 고정지출로 등록한다.
+
+`plan_items`는 실제 값(`month_entries`)이 연결되면 삭제할 수 없다. 종료 월을 정하거나 `is_active = false`로 둔다.
 
 ### 월별 기록
 
@@ -49,7 +52,8 @@
 - `months`는 직접 만들거나 상태를 바꿀 수 없다. 가구 생성 시 기준 월이 만들어지고, `close_month`가 다음 달을 연다.
 - 닫힌 달은 항상 앞쪽에 연속이다: `closed, closed, …, open(, open)`.
 - 마감된 달의 스냅샷·항목은 RLS가 insert/update/delete를 모두 거부한다.
-- 스냅샷·항목이 바뀌면 트리거가 `months.version`을 올린다. 오래된 화면에서 계산한 결과로 마감하는 것을 막기 위해서다.
+- 스냅샷·항목이 바뀌면 트리거가 `months.version`을 올린다. 오래된 화면에서 계산한 결과로 마감하는 것을 막기 위해서다. 앞 달을 다시 열거나 다시 마감해도 뒤 달의 `version`이 오른다.
+- 마감·재개·복원은 가구 단위로 직렬화되고, 마감과 거의 동시에 도착한 쓰기는 거부된다.
 
 ### 목표와 미래 계획
 
@@ -60,6 +64,7 @@
 | `scenarios` | 시뮬레이션 시나리오 | `is_base`, `assumptions`(jsonb), `excluded_event_ids` |
 | `future_events` | 미래 이벤트 | `scenario_id`(null = 공통), `kind`, `month`, `params`(jsonb) |
 
+`future_events.kind`: `income_change` 소득 변화 / `expense_change` 지출 변화 / `one_time` 일회성 / `loan` 대출 발생 / `home_move_in` 주택 입주 / `home_sale` 주택 매도 / `loan_payoff` 대출 상환 완료 / `parental_leave` 출산·육아휴직.
 `assumptions`와 `params`의 형태는 `types.ts`의 `Assumptions`, `FutureEventParams`를 따른다.
 
 ## RPC

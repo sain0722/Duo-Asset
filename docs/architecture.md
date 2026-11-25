@@ -44,36 +44,42 @@ src/
     manifest.ts           PWA 매니페스트
     login/                로그인 (공개 회원가입 없음)
     onboarding/           가구 만들기 / 초대 수락
+    setup/                환경변수가 없을 때의 안내 화면
     (app)/                로그인 + 가구가 있어야 들어오는 영역
-      layout.tsx          앱 셸 (PC: 사이드바, 모바일: 하단 탭) + 데이터 게이트
+      layout.tsx          앱 셸 (PC: 사이드바, 모바일: 하단 탭) + 가구 데이터 게이트
       page.tsx            홈
-      plan/               월급·배분
-      joint/              공용통장
-      settlement/         월 정산 (+ [month] 이력)
-      assets/             자산 (+ [id] 상세)
-      liabilities/        부채·고정지출
-      goals/              목표
-      simulation/         미래 시뮬레이션
+      plan/ joint/        월급·배분, 공용통장
+      settlement/         월 정산과 이력
+      assets/ liabilities/  자산(+ [id] 상세), 부채·고정지출
+      goals/ simulation/  목표, 미래 시뮬레이션
       settings/           설정 · 백업 · 로그아웃
     api/keepalive/        Supabase 무료 플랜 일시중지 방지용 크론
+    dev/kit/              디자인 킷 쇼케이스 (개발 서버에서만 열린다)
   proxy.ts                세션 갱신, 비로그인 사용자 /login 으로 이동
   components/
     ui/                   기본 컴포넌트 (shadcn 방식)
+    shell/                앱 셸, 내비게이션 정의, 가구 데이터 게이트
     ...                   공용 컴포넌트 (금액 입력, 지표, 월 전환, 차트 등)
-  features/<기능>/         화면별 컴포넌트
+  features/<기능>/         화면별 컴포넌트와 화면 전용 순수 함수(+ 테스트)
+  hooks/                  공용 훅
   lib/
-    finance/              순수 계산 + 단위 테스트
-    data/                 Supabase 클라이언트, 조회, 변경, 파생 계산
-    format.ts             금액·날짜 표기
+    finance/              순수 계산 + 단위 테스트 (계획, 부채 일정, 정산, 목표, 시뮬레이션, 일괄 확인 제안)
+    data/                 Supabase 클라이언트, 조회, 변경, 파생 계산(derive), 인증
+    format.ts             금액·날짜 표기와 입력 파싱
     month.ts              월 키(YYYY-MM) 연산, Asia/Seoul 기준 현재 월
 supabase/
   config.jsonc            로컬 개발 스택 설정 (회원가입 비활성화)
   migrations/             스키마 · RLS · RPC
+scripts/
+  seed-demo.ts            로컬 Supabase 에 가상의 부부 데이터 생성 (앱과 같은 코드로 정산·마감)
+  generate-icons.mjs      PWA 아이콘 생성
 tests/
-  db/                     RLS·RPC 통합 테스트 (로컬 Supabase 필요)
+  db/                     RLS·RPC·데이터 계층 통합 테스트 (로컬 Supabase 필요)
   e2e/                    Playwright
 docs/
 ```
+
+각 화면의 `page.tsx`는 제목(metadata)만 내보내는 서버 컴포넌트이고, 본문은 `src/features/<기능>`의 클라이언트 컴포넌트가 `useHousehold()`로 받은 데이터로 그린다. 서버가 미리 그리는 것은 셸과 스켈레톤뿐이다.
 
 ## 데이터 흐름
 
@@ -90,7 +96,8 @@ docs/
 - 변경은 `src/lib/data/mutations.ts`의 함수로만 한다. 성공하면 가구 쿼리를 무효화해 다시 읽는다.
 - 모든 수정 가능한 행에는 `version`이 있다. 읽었던 `version`을 함께 보내고, DB 트리거가 일치하지 않으면 거부한다(`ConflictError`). 화면은 "다른 기기에서 먼저 수정했습니다"를 알리고 최신 값을 다시 읽는다.
 - 두 사람이 서로 다른 행(다른 자산 잔액 등)을 고치는 것은 충돌이 아니다.
-- 월 마감·재개, 가구 생성, 초대 수락은 RPC(SECURITY DEFINER)로만 가능하다.
+- 월 마감·재개, 가구 생성, 초대 수락, 백업 복원은 RPC(SECURITY DEFINER)로만 가능하다.
+- 정산의 "한 번에 확인"은 `saveMonthInputs`가 테이블마다 한 번의 요청으로 저장한다.
 
 ### 계산
 
@@ -139,6 +146,11 @@ docs/
 | 월 마감 시 결과를 JSON으로 동결한다 | 설정이나 계산 코드가 바뀌어도 과거 확정 수치가 변하지 않는다 |
 | 닫힌 달은 항상 연속, 가장 최근 마감만 재개 | 과거 잔액을 고치면 다음 달 결과가 달라지므로, 순서를 강제해 불일치를 막는다 |
 | 첫 달은 기준 월(잔액만) | 비교할 이전 잔액 없이 수입·소비를 추정하지 않기 위해 |
+| 달이 끝난 뒤에만 마감 | 스냅샷은 월말 잔액이다. 미리 마감하면 그 뒤의 급여·지출이 다음 달 계산에 섞인다 |
+| 원금 상환액·신규 차입은 가구 순액 | 대환·입주처럼 한 대출을 갚고 다른 대출을 받는 달에 저축액이 튀지 않게 |
+| 보관은 계산에 영향을 주지 않는다 | 금액이 남은 자산·부채가 조용히 사라져 가짜 소비가 생기는 것을 막는다. 0을 기록해야 정리된다 |
+| 구조상 정해지는 값은 제안만 하고 사용자가 확인 | "매월 5분"과 "임의로 확정하지 않는다"를 함께 지키기 위해 |
+| 백업 복원은 DB 함수 하나(한 트랜잭션) | 무료 플랜에는 자동 백업이 없다. 중간에 실패해도 기존 데이터가 남아야 한다 |
 | DB 컬럼명을 TypeScript에서 그대로 쓴다 | 두 사람용 서비스에 매핑 계층은 과하다 |
 | 금액은 `bigint` 원 단위 | 부동소수점 오차 원천 차단 |
 | 실시간 구독 대신 포커스 재조회 + 낙관적 잠금 | 동시 수정으로 인한 데이터 손실은 막으면서 구성 요소를 줄인다 |
