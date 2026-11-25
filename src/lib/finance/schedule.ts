@@ -126,3 +126,23 @@ export function payoffMonth(
   const last = rows[rows.length - 1];
   return last && last.balance === 0 ? last.month : null;
 }
+
+/**
+ * 예정대로 갚을 때 언제 끝나고, 끝나면 매월 얼마가 풀리는가.
+ * 풀리는 금액은 마지막 회차(잔액 정리분)가 아니라 평소 회차의 납부액이고,
+ * 만기일시상환은 원금이 아니라 매월 내던 이자다.
+ */
+export function payoffSummary(
+  liability: Liability,
+  fromMonth: Ym,
+  openingBalance: Won,
+  maxMonths = 600,
+): { schedule: ScheduleRow[]; endMonth: Ym | null; freed: Won } {
+  const schedule = buildSchedule(liability, fromMonth, openingBalance, maxMonths);
+  const last = schedule.at(-1);
+  const endMonth = last && last.balance === 0 ? last.month : null;
+  const paying = schedule.filter((row) => row.payment > 0);
+  const regular = paying.length > 1 ? paying[paying.length - 2] : paying[0];
+  const freed = !endMonth || !regular ? 0 : liability.kind === "bullet" ? regular.interest : regular.payment;
+  return { schedule, endMonth, freed };
+}

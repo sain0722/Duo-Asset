@@ -15,7 +15,7 @@ import {
   type HistoryPoint,
 } from "@/lib/data/derive";
 import type { HouseholdData } from "@/lib/data/types";
-import { buildSchedule, eventsForScenario, percentOf } from "@/lib/finance";
+import { eventsForScenario, payoffSummary, percentOf } from "@/lib/finance";
 import type {
   BalanceTotals,
   ExpenseChangeParams,
@@ -272,16 +272,14 @@ export function upcoming(data: HouseholdData, args: { today: string; plan: Month
   for (const liability of data.liabilities) {
     const balance = base.liabilityBalances[liability.id] ?? 0;
     if (balance <= 0) continue;
-    const rows = buildSchedule(liability, base.startMonth, balance, diffMonths(base.startMonth, horizon) + 1);
-    const last = rows.at(-1);
-    if (!last || last.balance !== 0 || !within(last.month)) continue;
-    const regular = rows.length >= 2 ? rows[rows.length - 2] : last;
+    const payoff = payoffSummary(liability, base.startMonth, balance, diffMonths(base.startMonth, horizon) + 1);
+    if (!payoff.endMonth || !within(payoff.endMonth)) continue;
     ahead.push({
       key: `debt:${liability.id}`,
       kind: "debt_end",
-      month: last.month,
+      month: payoff.endMonth,
       name: liability.name,
-      freed: liability.kind === "bullet" ? regular.interest : regular.payment,
+      freed: payoff.freed,
     });
   }
 

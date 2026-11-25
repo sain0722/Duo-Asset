@@ -3,6 +3,7 @@ import { ASSET_KINDS } from "./meta";
 import { buildPlanLines, isPlanItemActive, summarizePlan } from "./plan";
 import { scheduledPayment } from "./schedule";
 import type {
+  Asset,
   Assumptions,
   ExpenseChangeParams,
   FutureEvent,
@@ -14,6 +15,7 @@ import type {
   LoanPayoffParams,
   OneTimeParams,
   ParentalLeaveParams,
+  PlanItem,
   RepaymentMethod,
   Scenario,
   SimulationInput,
@@ -178,6 +180,23 @@ export function expandEvent(event: FutureEvent): Effect[] {
 }
 
 // ───────────────────────── 시뮬레이션 ─────────────────────────
+
+/**
+ * 월 투자액을 따로 정하지 않았을 때 쓰는 값:
+ * 그 달에 유효한 저축 계획 항목 중 투자·연금 자산으로 가는 것의 합.
+ */
+export function plannedMonthlyInvestment(planItems: PlanItem[], assets: Asset[], month: Ym): Won {
+  const kindById = new Map(assets.map((asset) => [asset.id, asset.kind]));
+  return planItems
+    .filter(
+      (item) =>
+        item.kind === "saving" &&
+        item.asset_id !== null &&
+        isPlanItemActive(item, month) &&
+        ASSET_KINDS[kindById.get(item.asset_id) ?? "cash"].bucket === "invested",
+    )
+    .reduce((total, item) => total + item.amount, 0);
+}
 
 /** 연 이율(%) → 월 복리 이율 */
 function monthlyRate(annualPct: number): number {
@@ -409,16 +428,7 @@ export function simulate(input: SimulationInput): SimulationResult {
     // 5. 현금 흐름과 투자 이동
     const savings = income - consumption - principalPaid;
     cash += savings;
-    const toInvest =
-      assumptions.monthlyInvestment ??
-      activeItems
-        .filter(
-          (item) =>
-            item.kind === "saving" &&
-            item.asset_id !== null &&
-            ASSET_KINDS[assetById.get(item.asset_id)?.kind ?? "cash"].bucket === "invested",
-        )
-        .reduce((total, item) => total + item.amount, 0);
+    const toInvest = assumptions.monthlyInvestment ?? plannedMonthlyInvestment(planItems, assets, month);
     cash -= toInvest;
     invested += toInvest;
 

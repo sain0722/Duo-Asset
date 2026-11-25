@@ -2,7 +2,7 @@
  * 부채·고정지출 화면 전용 파생 값. 순수 함수만 둔다 (React·Supabase import 금지).
  * 상환 일정 자체는 lib/finance 의 buildSchedule 이 계산하고, 여기서는 화면에 맞게 고르고 묶는다.
  */
-import { buildSchedule, percentOf } from "@/lib/finance";
+import { payoffSummary, percentOf } from "@/lib/finance";
 import type { Liability, LiabilityLine, MonthPlan, PlanItem, PocketId, ScheduleRow, Won, Ym } from "@/lib/finance/types";
 import { pocketOf } from "@/lib/finance/meta";
 import type { HistoryPoint } from "@/lib/data/derive";
@@ -45,13 +45,7 @@ export interface PayoffInfo {
 }
 
 export function payoffInfo(liability: Liability, from: Ym, balance: Won): PayoffInfo {
-  const schedule = buildSchedule(liability, from, balance);
-  const last = schedule.at(-1);
-  const endMonth = last && last.balance === 0 ? last.month : null;
-  const paying = schedule.filter((row) => row.payment > 0);
-  const regular = paying.length > 1 ? paying[paying.length - 2] : paying[0];
-  const freed = !endMonth || !regular ? 0 : liability.kind === "bullet" ? regular.interest : regular.payment;
-  return { schedule, endMonth, freed };
+  return payoffSummary(liability, from, balance);
 }
 
 // ───────────────────────── 여유 자금 변화 ─────────────────────────
