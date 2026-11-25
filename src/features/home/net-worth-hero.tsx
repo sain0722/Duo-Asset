@@ -2,25 +2,12 @@ import { Delta, Money } from "@/components/money";
 import { Stat } from "@/components/stat";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { basisText } from "@/lib/data/derive";
 import type { Won } from "@/lib/finance/types";
 import { formatMonthOnly } from "@/lib/format";
 
-import type { HeroBasis, HeroView } from "./home-model";
+import type { HeroView } from "./home-model";
 import { AssetsTip, LiabilitiesTip, LiquidTip, NetWorthTip } from "./terms";
-
-function basisText(basis: HeroBasis): string {
-  const month = formatMonthOnly(basis.month);
-  switch (basis.kind) {
-    case "closed":
-      return `${month} 말 마감 기준`;
-    case "in_progress":
-      return `${month} 진행 중 · 일부 잔액은 전월 값`;
-    case "confirmed":
-      return `${month} 말 잔액 · 마감 전`;
-    case "baseline":
-      return `기준 월(${month}) 잔액`;
-  }
-}
 
 export function NetWorthHero({ hero, freeLiquid, className }: { hero: HeroView; freeLiquid: Won; className?: string }) {
   const { totals, basis, change } = hero;

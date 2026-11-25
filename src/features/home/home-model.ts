@@ -6,18 +6,18 @@ import {
   baseScenario,
   currentPosition,
   lastClosedMonth,
-  latestMonth,
-  previousMonth,
+  positionView,
   projectionBase,
   reportFor,
   workingMonth,
   type GoalsView,
   type HistoryPoint,
+  type PositionBasis,
+  type PositionView,
 } from "@/lib/data/derive";
 import type { HouseholdData } from "@/lib/data/types";
 import { eventsForScenario, payoffSummary, percentOf } from "@/lib/finance";
 import type {
-  BalanceTotals,
   ExpenseChangeParams,
   FutureEvent,
   FutureEventKind,
@@ -44,57 +44,10 @@ function dayOf(date: string): number {
 
 // ───────────────────────── 순자산 히어로 ─────────────────────────
 
-export type HeroBasis =
-  /** 열린 달에 확인한 잔액이 아직 없다: 값은 마지막 마감 달 말 그대로 */
-  | { kind: "closed"; month: Ym }
-  /** 일부 잔액만 확인했다: 나머지는 전월 값 */
-  | { kind: "in_progress"; month: Ym }
-  /** 모든 항목을 확인했고 마감만 남았다 */
-  | { kind: "confirmed"; month: Ym }
-  /** 마감한 달이 없다 (기준 월 입력 중) */
-  | { kind: "baseline"; month: Ym };
-
-export interface HeroView {
-  totals: BalanceTotals;
-  basis: HeroBasis;
-  /** 순자산 증감. since 달 말 대비. 비교할 달이 없으면 null */
-  change: { amount: Won; since: Ym } | null;
-}
-
-export function heroView(data: HouseholdData): HeroView | null {
-  const position = currentPosition(data);
-  const latest = latestMonth(data);
-  if (!latest || !position.report) return null;
-  const totals = position.totals;
-
-  const closed = lastClosedMonth(data);
-  if (!closed) return { totals, basis: { kind: "baseline", month: latest.month }, change: null };
-
-  const closedReport = reportFor(data, closed);
-  const openMonths = data.months.filter((month) => month.status === "open");
-  const touched = openMonths.some((month) => {
-    const report = reportFor(data, month);
-    return report.assetLines.some((line) => line.confirmed) || report.liabilityLines.some((line) => line.confirmed);
-  });
-
-  if (!touched) {
-    // 화면의 값이 곧 마지막 마감 달 말 값이므로, 증감도 그 달 한 달 동안의 변화로 보여 준다.
-    const before = previousMonth(data, closed);
-    return {
-      totals,
-      basis: { kind: "closed", month: closed.month },
-      change: before
-        ? { amount: closedReport.closing.netWorth - reportFor(data, before).closing.netWorth, since: before.month }
-        : null,
-    };
-  }
-
-  return {
-    totals,
-    basis: { kind: position.report.complete ? "confirmed" : "in_progress", month: latest.month },
-    change: { amount: totals.netWorth - closedReport.closing.netWorth, since: closed.month },
-  };
-}
+/** 기준 표기와 증감은 자산·부채·목표 화면과 같은 규칙(positionView)을 쓴다 */
+export type HeroBasis = PositionBasis;
+export type HeroView = PositionView;
+export const heroView = positionView;
 
 // ───────────────────────── 정산 안내 · 시작하기 ─────────────────────────
 

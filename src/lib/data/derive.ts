@@ -30,6 +30,7 @@ import type {
   Ym,
 } from "@/lib/finance/types";
 import { JOINT } from "@/lib/finance/types";
+import { formatMonthOnly } from "@/lib/format";
 import { addMonths, compareYm, currentYm, ymRange } from "@/lib/month";
 import { EMPTY_MONTH_DATA, type HouseholdData } from "./types";
 
@@ -214,6 +215,86 @@ export function currentPosition(data: HouseholdData): Position {
     assetPrincipals: Object.fromEntries(report.assetLines.map((line) => [line.assetId, line.principal])),
     liabilityBalances: Object.fromEntries(report.liabilityLines.map((line) => [line.liabilityId, line.balance])),
   };
+}
+
+// ───────────────────────── 지금 값의 기준 표기 ─────────────────────────
+
+export type PositionBasis =
+  /** 열린 달에 확인한 잔액이 아직 없다: 값은 마지막 마감 달 말 그대로 */
+  | { kind: "closed"; month: Ym }
+  /** 일부 잔액만 확인했다: 나머지는 전월 값 */
+  | { kind: "in_progress"; month: Ym }
+  /** 모든 항목을 확인했고 마감만 남았다 */
+  | { kind: "confirmed"; month: Ym }
+  /** 마감한 달이 없다 (기준 월 입력 중) */
+  | { kind: "baseline"; month: Ym };
+
+export interface PositionView {
+  totals: BalanceTotals;
+  basis: PositionBasis;
+  /** 비교 기준이 되는 달 말의 합계 (증감 = totals − compare.totals). 비교할 달이 없으면 null */
+  compare: { totals: BalanceTotals; since: Ym } | null;
+  /** 순자산 증감. since 달 말 대비. 비교할 달이 없으면 null */
+  change: { amount: Won; since: Ym } | null;
+}
+
+/**
+ * 지금 보여 주는 잔액이 "어느 시점의 값인지"와 무엇과 비교할지를 정한다.
+ * 홈·자산·부채·목표 화면이 같은 표기를 쓰도록 한곳에 둔다.
+ *
+ * 새 달이 열렸지만 확인한 잔액이 하나도 없으면 화면의 값은 지난 마감 달 말 값이다.
+ * 이때 "이번 달 기준 · 지난달보다 0원"처럼 모르는 변화를 0으로 보여 주지 않는다.
+ */
+export function positionView(data: HouseholdData): PositionView | null {
+  const position = currentPosition(data);
+  const latest = latestMonth(data);
+  if (!latest || !position.report) return null;
+  const totals = position.totals;
+
+  const closed = lastClosedMonth(data);
+  if (!closed) return { totals, basis: { kind: "baseline", month: latest.month }, compare: null, change: null };
+
+  const closedTotals = reportFor(data, closed).closing;
+  const touched = data.months
+    .filter((month) => month.status === "open")
+    .some((month) => {
+      const report = reportFor(data, month);
+      return report.assetLines.some((line) => line.confirmed) || report.liabilityLines.some((line) => line.confirmed);
+    });
+
+  if (!touched) {
+    // 화면의 값이 곧 마지막 마감 달 말 값이므로, 증감도 그 달 한 달 동안의 변화로 보여 준다.
+    const before = previousMonth(data, closed);
+    const compare = before ? { totals: reportFor(data, before).closing, since: before.month } : null;
+    return {
+      totals,
+      basis: { kind: "closed", month: closed.month },
+      compare,
+      change: compare && { amount: closedTotals.netWorth - compare.totals.netWorth, since: compare.since },
+    };
+  }
+
+  return {
+    totals,
+    basis: { kind: position.report.complete ? "confirmed" : "in_progress", month: latest.month },
+    compare: { totals: closedTotals, since: closed.month },
+    change: { amount: totals.netWorth - closedTotals.netWorth, since: closed.month },
+  };
+}
+
+/** 기준 표기 문구 (예: "10월 말 마감 기준") */
+export function basisText(basis: PositionBasis): string {
+  const month = formatMonthOnly(basis.month);
+  switch (basis.kind) {
+    case "closed":
+      return `${month} 말 마감 기준`;
+    case "in_progress":
+      return `${month} 진행 중 · 일부 잔액은 전월 값`;
+    case "confirmed":
+      return `${month} 말 잔액 · 마감 전`;
+    case "baseline":
+      return `기준 월(${month}) 잔액`;
+  }
 }
 
 // ───────────────────────── 미래 계산의 출발점 ─────────────────────────
