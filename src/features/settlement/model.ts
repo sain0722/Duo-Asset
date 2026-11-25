@@ -3,6 +3,9 @@
  * 순수 함수만 둔다 (React·Supabase import 금지).
  */
 import { memberIdOf, percentOf } from "@/lib/finance";
+
+// 자산 화면도 같은 규칙으로 저장하도록 계산 코어에 둔다
+export { plannedSavingsByAsset, principalAfter } from "@/lib/finance";
 import type { SuggestedInputs } from "@/lib/finance/suggest";
 import type { AmountLine, AssetLine, LiabilityLine, MonthReport, PlanLine, PocketId, Won } from "@/lib/finance/types";
 
@@ -68,21 +71,6 @@ export interface Progress {
 export function progressOf(items: CheckItem[], section?: SectionId): Progress {
   const scoped = section ? items.filter((item) => item.section === section) : items;
   return { done: scoped.filter((item) => item.done).length, total: scoped.length };
-}
-
-/** 자산별로 연결된 저축 계획 금액 (같은 자산에 여러 항목이 있으면 합) */
-export function plannedSavingsByAsset(planLines: PlanLine[]): Record<string, Won> {
-  const result: Record<string, Won> = {};
-  for (const line of planLines) {
-    if (line.kind !== "saving" || !line.assetId) continue;
-    result[line.assetId] = (result[line.assetId] ?? 0) + line.amount;
-  }
-  return result;
-}
-
-/** 평가형 자산의 월말 순투입액 = 월초 순투입액 + 이번 달 순입금(넣은 돈 − 뺀 돈) */
-export function principalAfter(line: Pick<AssetLine, "openPrincipal">, netDeposit: Won): Won {
-  return line.openPrincipal + netDeposit;
 }
 
 /** 잔액형 자산을 "예정대로" 확인할 때의 잔액 = 월초 + 연결된 저축 계획 */

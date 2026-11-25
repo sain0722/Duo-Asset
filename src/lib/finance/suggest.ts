@@ -1,5 +1,5 @@
 import { memberIdOf } from "./meta";
-import type { AssetKind, MonthReport, PocketId, Won } from "./types";
+import type { AssetKind, AssetLine, MonthReport, PlanLine, PocketId, Won } from "./types";
 
 /** 한 번에 확인할 수 있는 "예정대로" 값. 사용자가 목록을 보고 직접 눌러야 저장된다. */
 export interface SuggestedInputs {
@@ -29,6 +29,21 @@ export interface SuggestedInputs {
   count: number;
 }
 
+/** 자산별로 연결된 저축 계획 금액 (같은 자산에 여러 항목이 있으면 합) */
+export function plannedSavingsByAsset(planLines: PlanLine[]): Record<string, Won> {
+  const result: Record<string, Won> = {};
+  for (const line of planLines) {
+    if (line.kind !== "saving" || !line.assetId) continue;
+    result[line.assetId] = (result[line.assetId] ?? 0) + line.amount;
+  }
+  return result;
+}
+
+/** 평가형 자산의 월말 순투입액 = 월초 순투입액 + 이번 달 순입금(넣은 돈 − 뺀 돈) */
+export function principalAfter(line: Pick<AssetLine, "openPrincipal">, netDeposit: Won): Won {
+  return line.openPrincipal + netDeposit;
+}
+
 /**
  * 잔액을 직접 들여다보지 않아도 값이 정해지는 자산 유형.
  * 입출금 통장과 투자자산은 매달 달라지므로 제안하지 않는다 (사용자가 실제 값을 확인해야 한다).
@@ -45,12 +60,11 @@ const PREDICTABLE: AssetKind[] = ["deposit", "savings", "lease_deposit", "presal
 export function suggestInputs(report: MonthReport): SuggestedInputs {
   const result: SuggestedInputs = { assets: [], liabilities: [], entries: [], count: 0 };
   if (report.isBaseline) return result;
+  const plannedByAsset = plannedSavingsByAsset(report.planLines);
 
   for (const line of report.assetLines) {
     if (line.confirmed || !PREDICTABLE.includes(line.kind)) continue;
-    const planned = report.planLines
-      .filter((plan) => plan.kind === "saving" && plan.assetId === line.assetId)
-      .reduce((total, plan) => total + plan.amount, 0);
+    const planned = plannedByAsset[line.assetId] ?? 0;
     result.assets.push({
       assetId: line.assetId,
       name: line.name,
