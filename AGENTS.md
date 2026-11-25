@@ -58,6 +58,7 @@ npm run build        # 프로덕션 빌드
 
 ### UI
 
+- 화면을 만들기 전에 [docs/ui-guide.md](docs/ui-guide.md)를 읽는다(토큰, 컴포넌트별 props, 언제 무엇을 쓰는지). 실제 모습은 개발 서버의 `/dev/kit`.
 - 기본 컴포넌트는 `src/components/ui`, 공용 조합은 `src/components`, 화면 전용은 `src/features/<기능>`.
 - 색·간격·반경은 `globals.css`의 토큰만 쓴다. 임의의 hex 색을 쓰지 않는다. 라이트/다크 모두 확인한다.
 - 모바일(360px)에서 먼저 확인한다. 가로 스크롤이 생기면 안 된다. 터치 대상은 44px 이상.
