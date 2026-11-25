@@ -134,14 +134,18 @@ export function monthInputFor(data: HouseholdData, month: MonthRow): MonthInput 
   const prevReport = prev ? reportFor(data, prev) : null;
   const own = data.monthData[month.id] ?? EMPTY_MONTH_DATA;
 
-  // 이 달에는 아직 없던 자산·부채(더 나중 달에 처음 기록된 것)는 뺀다.
-  // 달을 다시 열었을 때 나중에 등록한 항목이 0원짜리 미확인 줄로 끼어들어 다음 달 계산을 바꾸는 것을 막는다.
+  // 이 달에는 없던 자산·부채는 뺀다. 달을 다시 열었을 때 나중에 등록(또는 복원)한 항목이
+  // 0원짜리 미확인 줄로 끼어들어 재마감을 막거나 다음 달 계산을 바꾸는 것을 막는다.
+  //  - 다시 연 달: 마감 당시 줄에 있던 것만 (그 달에 실제로 있던 항목)
+  //  - 처음 여는 달: 더 나중 달에 처음 기록된 것을 뺀다
   const index = data.months.findIndex((m) => m.id === month.id);
   const later = data.months.slice(index + 1).map((m) => data.monthData[m.id] ?? EMPTY_MONTH_DATA);
   const prevAssetIds = new Set((prevReport?.assetLines ?? []).map((line) => line.assetId));
   const ownAssetIds = new Set(own.assetSnapshots.map((s) => s.asset_id));
   const prevLiabilityIds = new Set((prevReport?.liabilityLines ?? []).map((line) => line.liabilityId));
   const ownLiabilityIds = new Set(own.liabilitySnapshots.map((s) => s.liability_id));
+  const frozenAssetIds = month.summary ? new Set(month.summary.assetLines.map((line) => line.assetId)) : null;
+  const frozenLiabilityIds = month.summary ? new Set(month.summary.liabilityLines.map((line) => line.liabilityId)) : null;
 
   return {
     month: month.month,
@@ -151,13 +155,17 @@ export function monthInputFor(data: HouseholdData, month: MonthRow): MonthInput 
       (asset) =>
         prevAssetIds.has(asset.id) ||
         ownAssetIds.has(asset.id) ||
-        !later.some((d) => d.assetSnapshots.some((s) => s.asset_id === asset.id)),
+        (frozenAssetIds
+          ? frozenAssetIds.has(asset.id)
+          : !later.some((d) => d.assetSnapshots.some((s) => s.asset_id === asset.id))),
     ),
     liabilities: data.liabilities.filter(
       (liability) =>
         prevLiabilityIds.has(liability.id) ||
         ownLiabilityIds.has(liability.id) ||
-        !later.some((d) => d.liabilitySnapshots.some((s) => s.liability_id === liability.id)),
+        (frozenLiabilityIds
+          ? frozenLiabilityIds.has(liability.id)
+          : !later.some((d) => d.liabilitySnapshots.some((s) => s.liability_id === liability.id))),
     ),
     planLines: planLinesFor(data, month),
     prevAssetSnapshots: (prevReport?.assetLines ?? []).map((line) => ({

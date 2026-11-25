@@ -502,15 +502,15 @@ describe("미래 시뮬레이션: 수익 (10절 1항)", () => {
   });
 
   it("수익은 월 복리 이율로 월초 잔액에 붙이고 원 단위로 반올림한다", () => {
-    const input = base({ assumptions: { ...FLAT, cashReturnPct: 12, investReturnPct: 5, realEstateGrowthPct: 3 } });
+    const input = base({ assumptions: { ...FLAT, cashReturnPct: 12, investReturnPct: 7, realEstateGrowthPct: 3 } });
     const home = asset({ kind: "real_estate", liquidity: "locked" });
     input.assets.push(home);
     input.assetValues = { ...input.assetValues, [home.id]: 400_000_000 };
     const first = simulate(input).points[0];
     // 1,000만 × 1.12^(1/12) = 10,094,887.93 → 10,094,888, 여기에 그 달 저축 200만
     expect(first.cash).toBe(10_094_888 + 2_000_000);
-    // 2,000만 × 1.05^(1/12) = 20,081,482.48 → 20,081,482
-    expect(first.invested).toBe(20_081_482);
+    // 2,000만 × 1.07^(1/12) = 20,113,082.91 → 20,113,083
+    expect(first.invested).toBe(20_113_083);
     // 4억 × 1.03^(1/12) = 400,986,507.91 → 400,986,508. 분양 납부금 5,000만에는 붙지 않는다.
     expect(first.fixed).toBe(400_986_508 + 50_000_000);
     // 수익은 수입·저축이 아니다

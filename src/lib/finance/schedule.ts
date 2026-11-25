@@ -49,8 +49,11 @@ export function scheduledPayment(liability: Liability, month: Ym, openingBalance
     case "installment": {
       const perMonth =
         liability.monthly_payment ?? (term ? Math.round(liability.original_principal / term) : 0);
-      // 마지막 회차에는 나누어떨어지지 않아 남은 몇 원까지 정리한다
-      principal = isLast ? openingBalance : Math.min(openingBalance, perMonth);
+      // 마지막 회차에는 나누어떨어지지 않아 남은 몇 원까지 정리한다.
+      // 시작 월을 몰라 회차를 셀 수 없을 때도, 이번에 내고 남는 돈이 반올림 끝수뿐이면 함께 정리한다.
+      const residue = openingBalance - perMonth;
+      const onlyRounding = term !== null && residue > 0 && residue < term;
+      principal = isLast || onlyRounding ? openingBalance : Math.min(openingBalance, perMonth);
       break;
     }
     case "equal_principal": {

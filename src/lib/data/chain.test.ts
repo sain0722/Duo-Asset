@@ -627,25 +627,44 @@ describe("연쇄 불변식 (무작위 가구 × 6개월)", () => {
   // 더 넓게 돌려 보고 싶으면: CHAIN_HOUSEHOLDS=5000 npx vitest run --project unit src/lib/data/chain.test.ts
   const HOUSEHOLDS = Number(process.env.CHAIN_HOUSEHOLDS ?? 60);
 
-  it("매달 항등식·주머니 합·이동 상쇄가 성립하고, 월초 합계는 직전 달 월말 합계와 같다", () => {
+  // 가구 수에 비례해 넉넉히 (기본 60곳은 1초 안에 끝난다)
+  const TIMEOUT = 20_000 + HOUSEHOLDS * 30;
+  /** 두 테스트가 같은 실행 결과를 본다 (하나만 골라 돌려도 되도록 한 번만 굴린다) */
+  let ran = false;
+  const runAll = () => {
+    if (ran) return;
+    ran = true;
     for (let seed = 1; seed <= HOUSEHOLDS; seed++) runHousehold(20261125 + seed, stats);
-    expect(stats.months).toBe(HOUSEHOLDS * MONTHS);
-  });
+  };
+
+  it(
+    "매달 항등식·주머니 합·이동 상쇄가 성립하고, 월초 합계는 직전 달 월말 합계와 같다",
+    () => {
+      runAll();
+      expect(stats.months).toBe(HOUSEHOLDS * MONTHS);
+    },
+    TIMEOUT,
+  );
 
   // 가구 수를 줄여 돌릴 때는 통계가 흔들리므로 기본 규모 이상에서만 본다
-  it.skipIf(HOUSEHOLDS < 60)("난수 시나리오가 실제로 여러 상황을 지나간다 (빈 테스트가 아니다)", () => {
-    // 위 테스트가 모은 통계. 생성기를 고쳐 어떤 상황이 사라지면 여기서 알 수 있다.
-    // (가구 60곳 기준 실제 값의 절반 이하로 잡은 하한이다)
-    expect(stats.provisional).toBeGreaterThan(HOUSEHOLDS * 2); // 미확인이 섞인 달
-    expect(stats.adjusted).toBeGreaterThan(HOUSEHOLDS); // opening_* 로 뒤늦게 등록해 기초 조정이 생긴 달
-    expect(stats.borrowed).toBeGreaterThan(HOUSEHOLDS); // 부채 합계가 늘어난 달
-    expect(stats.repaid).toBeGreaterThan(HOUSEHOLDS); // 부채 합계가 줄어든 달
-    expect(stats.reopened).toBeGreaterThan(HOUSEHOLDS); // 마감 취소
-    expect(stats.pocketChanged).toBeGreaterThan(HOUSEHOLDS); // 실제 항목에서 주머니 변경
-    expect(stats.transfers).toBeGreaterThan(HOUSEHOLDS * 3); // 주머니 간 이동
-    expect(stats.singleMember).toBeGreaterThan(HOUSEHOLDS / 10); // 구성원 1명인 가구
-    expect(stats.archivedWithBalance).toBeGreaterThan(HOUSEHOLDS); // 금액이 남은 채 보관한 자산이 미확인으로 남은 달
-    expect(stats.dropped).toBeGreaterThan(HOUSEHOLDS / 10); // 보관했고 0원이라 줄에서 빠진 자산
-    expect(stats.oneMissing).toBeGreaterThan(HOUSEHOLDS * 3); // 하나만 미확인으로 남긴 달
-  });
+  it.skipIf(HOUSEHOLDS < 60)(
+    "난수 시나리오가 실제로 여러 상황을 지나간다 (빈 테스트가 아니다)",
+    () => {
+      runAll();
+      // 생성기를 고쳐 어떤 상황이 사라지면 여기서 알 수 있다.
+      // (가구 60곳 기준 실제 값의 절반 이하로 잡은 하한이다)
+      expect(stats.provisional).toBeGreaterThan(HOUSEHOLDS * 2); // 미확인이 섞인 달
+      expect(stats.adjusted).toBeGreaterThan(HOUSEHOLDS); // opening_* 로 뒤늦게 등록해 기초 조정이 생긴 달
+      expect(stats.borrowed).toBeGreaterThan(HOUSEHOLDS); // 부채 합계가 늘어난 달
+      expect(stats.repaid).toBeGreaterThan(HOUSEHOLDS); // 부채 합계가 줄어든 달
+      expect(stats.reopened).toBeGreaterThan(HOUSEHOLDS); // 마감 취소
+      expect(stats.pocketChanged).toBeGreaterThan(HOUSEHOLDS); // 실제 항목에서 주머니 변경
+      expect(stats.transfers).toBeGreaterThan(HOUSEHOLDS * 3); // 주머니 간 이동
+      expect(stats.singleMember).toBeGreaterThan(HOUSEHOLDS / 10); // 구성원 1명인 가구
+      expect(stats.archivedWithBalance).toBeGreaterThan(HOUSEHOLDS); // 금액이 남은 채 보관한 자산이 미확인으로 남은 달
+      expect(stats.dropped).toBeGreaterThan(HOUSEHOLDS / 10); // 보관했고 0원이라 줄에서 빠진 자산
+      expect(stats.oneMissing).toBeGreaterThan(HOUSEHOLDS * 3); // 하나만 미확인으로 남긴 달
+    },
+    TIMEOUT,
+  );
 });

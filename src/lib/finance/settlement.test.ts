@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeMonthReport, percentOf } from "./settlement";
+import { balanceTotals, computeMonthReport, percentOf } from "./settlement";
 import {
   actual,
   asset,
@@ -1382,5 +1382,54 @@ describe("저축률과 비율 반올림 (4절: %, 소수 1자리)", () => {
     const overspent = run(4_000_000, 4_000_000);
     expect(overspent.savings).toBe(-1_000_000);
     expect(overspent.savingsRate).toBe(-25);
+  });
+});
+
+describe("잔액 합계 (4절: 총자산·가용자산·금융자산)", () => {
+  // 종류마다 다른 자릿수의 금액을 써서 어떤 종류가 빠지거나 더해졌는지 합계에서 바로 드러나게 한다
+  const lines = [
+    { kind: "cash", liquidity: "liquid", value: 1 },
+    { kind: "deposit", liquidity: "short", value: 20 },
+    { kind: "savings", liquidity: "short", value: 300 },
+    { kind: "investment", liquidity: "short", value: 4_000 },
+    { kind: "pension", liquidity: "locked", value: 50_000 },
+    { kind: "real_estate", liquidity: "locked", value: 600_000 },
+    { kind: "lease_deposit", liquidity: "locked", value: 7_000_000 },
+    { kind: "presale", liquidity: "locked", value: 80_000_000 },
+    { kind: "vehicle", liquidity: "locked", value: 900_000_000 },
+    { kind: "other", liquidity: "liquid", value: 1_000_000_000 },
+  ] as const;
+  const totals = balanceTotals([...lines], [{ balance: 30_000 }, { balance: 4_000 }]);
+
+  it("총자산은 모든 자산의 합, 총부채는 남은 원금의 합, 순자산은 그 차이다", () => {
+    expect(totals.assets).toBe(1_987_654_321);
+    expect(totals.liabilities).toBe(34_000);
+    expect(totals.netWorth).toBe(1_987_620_321);
+  });
+
+  it("금융자산은 현금·예금·적금·투자·연금만 더한다 (부동산·보증금·분양 납부금·자동차·기타 제외)", () => {
+    expect(totals.financial).toBe(54_321);
+  });
+
+  it("가용자산은 종류가 아니라 유동성이 '즉시 사용 가능'인 자산의 합이다", () => {
+    // 현금 1 + 즉시 사용 가능으로 표시한 기타 자산 10억. 예금·적금·투자는 현금화 가능일 뿐이다.
+    expect(totals.liquid).toBe(1_000_000_001);
+  });
+
+  it("종류별 합계는 같은 종류끼리 더하고, 마이너스 통장은 음수 그대로 더한다", () => {
+    const overdraft = balanceTotals(
+      [
+        { kind: "cash", liquidity: "liquid", value: 3_000_000 },
+        { kind: "cash", liquidity: "liquid", value: -1_200_000 },
+        { kind: "savings", liquidity: "short", value: 5_000_000 },
+      ],
+      [],
+    );
+    expect(overdraft.byKind).toEqual({ cash: 1_800_000, savings: 5_000_000 });
+    expect(overdraft).toMatchObject({ assets: 6_800_000, liquid: 1_800_000, financial: 6_800_000, liabilities: 0, netWorth: 6_800_000 });
+  });
+
+  it("자산도 부채도 없으면 모든 합계가 0이다", () => {
+    expect(balanceTotals([], [])).toEqual({ assets: 0, liabilities: 0, netWorth: 0, liquid: 0, financial: 0, byKind: {} });
   });
 });

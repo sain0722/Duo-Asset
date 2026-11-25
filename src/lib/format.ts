@@ -85,7 +85,8 @@ export function formatDate(date: string): string {
  * - 해석할 수 없는 글자가 섞이면 틀린 숫자를 만들지 않고 null 을 돌려준다
  */
 export function parseWonInput(text: string): Won | null {
-  const cleaned = text.replace(/[\s,원]/g, "");
+  // 쉼표·공백과 끝에 붙은 "원"만 걷어 낸다 ("12원34" 처럼 중간에 낀 글자는 해석하지 않는다)
+  const cleaned = text.replace(/[\s,]/g, "").replace(/원$/, "");
   if (cleaned === "") return null;
   const negative = /^[-−]/.test(cleaned);
   const body = cleaned.replace(/^[-−+]/, "");

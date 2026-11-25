@@ -768,3 +768,73 @@ describe("보관한 자산과 달 다시 열기 (3절)", () => {
     expect(march.closing.assets).toBe(18_000_000);
   });
 });
+
+describe("그 달 계획의 부채 줄이 쓰는 월초 잔액 (7절)", () => {
+  // 원금균등 1,200만, 연 6%, 12개월, 2026-01 첫 납부: 매월 원금 100만, 이자는 월초 잔액 × 0.5%
+  const loanOf = (payerId: string) =>
+    liability({
+      kind: "equal_principal",
+      name: "대출",
+      original_principal: 12_000_000,
+      annual_rate: 6,
+      term_months: 12,
+      start_month: "2026-01",
+      payer_member_id: payerId,
+    });
+
+  it("전부터 있던 부채를 뒤늦게 등록하면 적어 둔 월초 잔액으로 이번 달 예정액을 계산한다", () => {
+    const { data, a, account, salary, mar } = threeMonths();
+    const loan = loanOf(a.id);
+    const withLoan = { ...data, liabilities: [loan] };
+    const debtLine = (d: typeof withLoan) => planLinesFor(d, d.months[2]).find((line) => line.kind === "debt")!;
+
+    // 아직 잔액을 적지 않았다: 최초 원금 기준 (이자 1,200만 × 0.5% = 6만)
+    expect(debtLine(withLoan)).toMatchObject({ principal: 1_000_000, interest: 60_000, amount: 1_060_000 });
+
+    // 3월 월초 잔액 1,000만, 월말 900만으로 등록: 이자 1,000만 × 0.5% = 5만
+    const registered = withMonthData(withLoan, mar.id, {
+      assetSnapshots: [assetSnap(account, 13_950_000)],
+      liabilitySnapshots: [liabilitySnap(loan, 9_000_000, { opening_balance: 10_000_000, interest_paid: 50_000 })],
+      entries: [actual(salary, 4_000_000)],
+    });
+    expect(debtLine(registered)).toMatchObject({ principal: 1_000_000, interest: 50_000, amount: 1_050_000 });
+
+    const report = reportFor(registered, registered.months[2]);
+    expect(report.liabilityLines[0]).toMatchObject({
+      openBalance: 10_000_000,
+      adjustment: 10_000_000,
+      plannedPrincipal: 1_000_000,
+      plannedInterest: 50_000,
+      principalPaid: 1_000_000,
+      interestPaid: 50_000,
+    });
+    // 통장 1,100 + 급여 400 − 원금 100 − 이자 5 = 1,395 → 소비는 이자 5만 원뿐
+    expect(report).toMatchObject({ complete: true, consumption: 50_000, principalRepaid: 1_000_000, newBorrowing: 0, adjustment: -10_000_000 });
+    expect(report.plan).toMatchObject({ principalRepayment: 1_000_000, consumption: 50_000 + 2_950_000 });
+  });
+
+  it("기준 월의 부채 줄은 그 달에 입력한 잔액으로 계산한다", () => {
+    const a = member("하늘");
+    const account = asset({ kind: "cash", owner_member_id: a.id });
+    const loan = loanOf(a.id);
+    const jan = monthRow("2026-01");
+    const data = household({
+      members: [a],
+      assets: [account],
+      liabilities: [loan],
+      months: [jan],
+      monthData: {
+        [jan.id]: monthData({
+          assetSnapshots: [assetSnap(account, 10_000_000)],
+          liabilitySnapshots: [liabilitySnap(loan, 8_000_000)],
+        }),
+      },
+    });
+    // 이자 800만 × 0.5% = 4만 (최초 원금 기준이면 6만)
+    expect(planLinesFor(data, jan).find((line) => line.kind === "debt")).toMatchObject({ principal: 1_000_000, interest: 40_000 });
+
+    // 잔액을 0으로 입력한(이미 다 갚은) 부채는 줄이 없다
+    const paidOff = { ...data, monthData: { [jan.id]: monthData({ liabilitySnapshots: [liabilitySnap(loan, 0)] }) } };
+    expect(planLinesFor(paidOff, jan)).toEqual([]);
+  });
+});

@@ -197,6 +197,12 @@ describe("반올림 방향 (7절: 이자는 round(남은 원금 × r))", () => {
     expect(monthlyInterest(100_000_000, 4.999)).toBe(416_583);
   });
 
+  it("이율을 정수로 바꿀 때 부동소수점 오차로 0.001%p 가 깎이지 않는다", () => {
+    // 4.02 × 1000 = 4019.9999999999995, 2.01 × 1000 = 2009.9999999999998 (버리면 이자가 100원 줄어든다)
+    expect(monthlyInterest(120_000_000, 4.02)).toBe(402_000);
+    expect(monthlyInterest(120_000_000, 2.01)).toBe(201_000);
+  });
+
   it("원금균등의 월 원금은 round(최초 원금 ÷ 기간)이다", () => {
     const up = liability({ kind: "equal_principal", original_principal: 10_000_000, annual_rate: 6, term_months: 36, start_month: "2026-01" });
     // 1,000만 ÷ 36 = 277,777.78 → 277,778 (버림이면 277,777)

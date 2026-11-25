@@ -508,7 +508,7 @@ export interface GoalProgress {
   goalId: string;
   current: Won;
   target: Won;
-  /** 0–100 (%), 소수 1자리 */
+  /** 달성률 %, 소수 1자리. 0 이상이고 상한은 없다 (목표를 넘기면 100 초과) */
   percent: number;
   remaining: Won;
   /** 목표일까지 필요한 월 적립액. 목표일이 없거나 지났으면 null */
