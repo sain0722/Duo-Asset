@@ -113,7 +113,7 @@ npm run lint         # ESLint
 npm run typecheck    # 타입 검사
 npm test             # 단위 테스트 (재무 계산 등, 인프라 불필요)
 npm run test:db      # 접근권한·월 마감·백업 통합 테스트 (로컬 Supabase 필요)
-npm run test:e2e     # 브라우저 E2E (로컬 Supabase + npm run build 필요)
+npm run test:e2e     # 브라우저 E2E (로컬 Supabase 필요. 별도 폴더에 빌드한 뒤 실행)
 npm run seed         # 로컬 Supabase 에 가상 데이터 생성
 ```
 

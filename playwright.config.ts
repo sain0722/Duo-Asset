@@ -1,8 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * E2E 테스트: 프로덕션 빌드(`npm run build`)를 로컬 Supabase 에 붙여 실행한다.
- *   npx supabase start && npm run build && npm run test:e2e
+ * E2E 테스트: 프로덕션 빌드를 로컬 Supabase 에 붙여 실행한다.
+ *   npx supabase start && npm run test:e2e
+ * 빌드는 .next-e2e 폴더에 따로 만들기 때문에 개발 서버를 띄운 채로도 실행할 수 있다.
  */
 const PORT = Number(process.env.E2E_PORT ?? 3100);
 
@@ -22,10 +23,11 @@ export default defineConfig({
     trace: "off",
   },
   webServer: {
-    command: `npm run start -- -p ${PORT}`,
+    command: `npx next build && npx next start -p ${PORT}`,
+    env: { NEXT_DIST_DIR: ".next-e2e" },
     url: `http://127.0.0.1:${PORT}/login`,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 300_000,
   },
   projects: [
     { name: "mobile", use: { ...devices["Pixel 7"] } },

@@ -45,6 +45,8 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   // 개발 서버를 http://127.0.0.1:3000 으로 열어도 HMR 이 동작하게 한다 (기본은 localhost 만 허용)
   allowedDevOrigins: ["127.0.0.1"],
+  // E2E 테스트는 별도 폴더(.next-e2e)에 빌드해 개발 서버(.next)와 동시에 돌릴 수 있게 한다
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   cacheComponents: true,
   partialPrefetching: true,
   poweredByHeader: false,
