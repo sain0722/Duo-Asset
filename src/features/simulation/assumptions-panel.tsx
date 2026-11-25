@@ -48,7 +48,7 @@ export function AssumptionsPanel({ values, onChange, baseValues, plannedInvestme
             {dirty ? "저장 중…" : "자동 저장"}
           </span>
         </CardTitle>
-        <CardDescription>이 시나리오에만 적용됩니다. 바꾸는 즉시 위 그래프에 반영됩니다.</CardDescription>
+        <CardDescription>이 시나리오에만 적용됩니다. 바꾸는 즉시 그래프에 반영되고, 손을 떼면 저장됩니다.</CardDescription>
       </CardHeader>
       <CardContent className="lg:hidden">
         <Button

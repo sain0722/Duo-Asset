@@ -109,6 +109,8 @@ function Simulation({ baseId }: { baseId: string }) {
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
                 <SegmentedControl
                   size="sm"
+                  fullWidth
+                  className="sm:inline-grid sm:w-auto"
                   aria-label="지표"
                   options={METRICS.map((m) => ({ value: m, label: METRIC_LABELS[m] }))}
                   value={metric}
@@ -116,6 +118,8 @@ function Simulation({ baseId }: { baseId: string }) {
                 />
                 <SegmentedControl
                   size="sm"
+                  fullWidth
+                  className="sm:inline-grid sm:w-auto"
                   aria-label="기간"
                   options={HORIZONS.map((y) => ({ value: y, label: `${y}년` }))}
                   value={String(draft.values.horizonYears) as (typeof HORIZONS)[number]}
