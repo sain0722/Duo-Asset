@@ -236,9 +236,90 @@ describe("미래 시뮬레이션", () => {
     expect(result.milestones.some((m) => m.kind === "cash_shortfall")).toBe(true);
   });
 
-  it("과거 날짜의 이벤트는 무시한다", () => {
-    const result = simulate(base({ events: [event("one_time", "2026-01", { amount: -40_000_000, asAsset: false })] }));
+  it("이미 지난 일회성 이벤트는 무시한다 (현재 잔액에 반영돼 있다)", () => {
+    const result = simulate(
+      base({
+        events: [
+          event("one_time", "2026-01", { amount: -40_000_000, asAsset: false }),
+          event("loan", "2026-02", { principal: 12_000_000, annualRate: 0, termMonths: 12, method: "equal_principal", toAsset: false }),
+        ],
+      }),
+    );
     expect(result.points[0].cash).toBe(12_000_000);
+    expect(result.points[0].liabilities).toBe(0);
+    expect(result.milestones.filter((m) => m.kind === "event")).toEqual([]);
+  });
+
+  it("이미 시작된 육아휴직·기간 한정 변화는 끝날 때까지 계속 적용된다", () => {
+    const input = base();
+    input.events = [
+      // 2월에 시작한 6개월 휴직: 4월(시작 월)에도 아직 휴직 중이다
+      event("parental_leave", "2026-02", {
+        memberId: input.members[1].id,
+        leaveMonths: 6,
+        monthlyIncomeDuringLeave: 1_500_000,
+        monthlyChildCost: 600_000,
+        oneTimeCost: 2_000_000,
+      }),
+      // 1월부터 5월까지의 임시 지출
+      event("expense_change", "2026-01", { monthlyDelta: 300_000, endMonth: "2026-05" }),
+    ];
+    const result = simulate(input);
+    const at = (m: string) => result.points.find((p) => p.month === m)!;
+    // 휴직 중: 바다 소득 150만
+    expect(at("2026-04").income).toBe(5_500_000);
+    expect(at("2026-07").income).toBe(5_500_000);
+    expect(at("2026-08").income).toBe(7_000_000);
+    // 육아비는 계속, 임시 지출은 5월까지, 출산 일회성 비용(2월)은 이미 지났다
+    expect(at("2026-04").consumption).toBe(5_000_000 + 600_000 + 300_000);
+    expect(at("2026-06").consumption).toBe(5_000_000 + 600_000);
+  });
+
+  it("보관한 부채도 원금이 남아 있으면 계속 갚는다", () => {
+    const input = base();
+    const old = liability({
+      kind: "installment",
+      original_principal: 3_000_000,
+      monthly_payment: 500_000,
+      payer_member_id: input.members[0].id,
+      is_active: false,
+    });
+    input.liabilities = [old];
+    input.liabilityBalances = { [old.id]: 1_000_000 };
+    const result = simulate(input);
+    expect(result.points[0].liabilities).toBe(500_000);
+    expect(result.points[1].liabilities).toBe(0);
+  });
+
+  it("만기일시상환이 끝나면 풀리는 돈은 원금이 아니라 매월 내던 이자다", () => {
+    const input = base({ assumptions: { ...FLAT, horizonYears: 2 } });
+    const bullet = liability({
+      kind: "bullet",
+      name: "전세대출",
+      original_principal: 60_000_000,
+      annual_rate: 4,
+      term_months: 12,
+      start_month: "2026-01",
+    });
+    input.liabilities = [bullet];
+    input.liabilityBalances = { [bullet.id]: 60_000_000 };
+    input.assetValues = { ...input.assetValues, [input.assets[0].id]: 80_000_000 };
+    const paidOff = simulate(input).milestones.find((m) => m.kind === "debt_paid_off")!;
+    expect(paidOff.month).toBe("2026-12");
+    expect(paidOff.amount).toBe(200_000);
+  });
+
+  it("이벤트로 받은 대출의 첫 납부는 실행한 다음 달이다", () => {
+    const result = simulate(
+      base({
+        events: [
+          event("loan", "2026-05", { principal: 12_000_000, annualRate: 0, termMonths: 12, method: "installment", toAsset: true }),
+        ],
+      }),
+    );
+    const at = (m: string) => result.points.find((p) => p.month === m)!;
+    expect(at("2026-05").debtPayment).toBe(0);
+    expect(at("2026-06").debtPayment).toBe(1_000_000);
   });
 
   it("시뮬레이션은 입력을 바꾸지 않는다", () => {

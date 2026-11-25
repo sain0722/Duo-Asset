@@ -178,7 +178,7 @@ export function goal(overrides: Partial<Goal> & Pick<Goal, "target_amount">): Go
 }
 
 export function allocation(g: Goal, a: Asset, amount: Won | null): GoalAllocation {
-  return { id: nextId("alloc"), household_id: HOUSEHOLD, goal_id: g.id, asset_id: a.id, amount };
+  return { id: nextId("alloc"), household_id: HOUSEHOLD, goal_id: g.id, asset_id: a.id, amount, version: 1 };
 }
 
 /** MonthInput 조립. 계획 줄은 planItems·liabilities 와 직전 달 부채 잔액에서 만든다. */

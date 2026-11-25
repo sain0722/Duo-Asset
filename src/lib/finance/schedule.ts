@@ -49,12 +49,13 @@ export function scheduledPayment(liability: Liability, month: Ym, openingBalance
     case "installment": {
       const perMonth =
         liability.monthly_payment ?? (term ? Math.round(liability.original_principal / term) : 0);
-      principal = Math.min(openingBalance, perMonth);
+      // 마지막 회차에는 나누어떨어지지 않아 남은 몇 원까지 정리한다
+      principal = isLast ? openingBalance : Math.min(openingBalance, perMonth);
       break;
     }
     case "equal_principal": {
       interest = monthlyInterest(openingBalance, rate);
-      if (term && nth !== null) {
+      if (term) {
         const perMonth = Math.round(liability.original_principal / term);
         principal = isLast ? openingBalance : Math.min(openingBalance, perMonth);
       }
@@ -62,8 +63,14 @@ export function scheduledPayment(liability: Liability, month: Ym, openingBalance
     }
     case "amortized": {
       interest = monthlyInterest(openingBalance, rate);
-      if (term && nth !== null) {
-        const payment = amortizedPayment(liability.original_principal, rate, term);
+      if (term) {
+        // 남은 원금을 남은 회차에 나눠 갚는 금액. 금리가 바뀌거나 중도상환을 하면
+        // 은행처럼 만기는 그대로 두고 월 납부액이 다시 계산된다.
+        const remaining = nth !== null ? Math.max(term - nth + 1, 1) : null;
+        const payment =
+          remaining !== null
+            ? amortizedPayment(openingBalance, rate, remaining)
+            : amortizedPayment(liability.original_principal, rate, term);
         principal = isLast ? openingBalance : Math.min(openingBalance, Math.max(payment - interest, 0));
       }
       break;

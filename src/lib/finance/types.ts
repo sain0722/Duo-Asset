@@ -198,6 +198,7 @@ export interface GoalAllocation {
   asset_id: string;
   /** null = 남은 금액 전부 */
   amount: Won | null;
+  version: number;
 }
 
 export interface Scenario {

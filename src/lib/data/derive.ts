@@ -95,7 +95,13 @@ export function reportFor(data: HouseholdData, month: MonthRow): MonthReport {
 
 /** 그 달의 계획 줄. 한 번 마감했던 달은 그때 동결한 계획을 그대로 쓴다. */
 export function planLinesFor(data: HouseholdData, month: MonthRow): PlanLine[] {
-  if (month.summary) return month.summary.planLines;
+  if (month.summary) {
+    if (month.status === "closed") return month.summary.planLines;
+    // 다시 연 달: 그 뒤 삭제된 계획 항목의 줄은 뺀다.
+    // (실제 값이 연결된 항목은 삭제할 수 없으므로, 삭제됐다면 확인할 값도 없다)
+    const alive = new Set(data.planItems.map((item) => item.id));
+    return month.summary.planLines.filter((line) => !line.planItemId || alive.has(line.planItemId));
+  }
   return buildPlanLines({
     month: month.month,
     planItems: data.planItems,
@@ -116,7 +122,7 @@ function openingLiabilityBalances(data: HouseholdData, month: MonthRow): Record<
   );
   // 전부터 있던 부채를 이번 달에 처음 등록했다면 적어 둔 월초 잔액을 쓴다
   for (const snapshot of own.liabilitySnapshots) {
-    if (!(snapshot.liability_id in balances) && snapshot.opening_balance !== null) {
+    if (!balances[snapshot.liability_id] && snapshot.opening_balance !== null) {
       balances[snapshot.liability_id] = snapshot.opening_balance;
     }
   }
@@ -127,12 +133,32 @@ export function monthInputFor(data: HouseholdData, month: MonthRow): MonthInput 
   const prev = previousMonth(data, month);
   const prevReport = prev ? reportFor(data, prev) : null;
   const own = data.monthData[month.id] ?? EMPTY_MONTH_DATA;
+
+  // 이 달에는 아직 없던 자산·부채(더 나중 달에 처음 기록된 것)는 뺀다.
+  // 달을 다시 열었을 때 나중에 등록한 항목이 0원짜리 미확인 줄로 끼어들어 다음 달 계산을 바꾸는 것을 막는다.
+  const index = data.months.findIndex((m) => m.id === month.id);
+  const later = data.months.slice(index + 1).map((m) => data.monthData[m.id] ?? EMPTY_MONTH_DATA);
+  const prevAssetIds = new Set((prevReport?.assetLines ?? []).map((line) => line.assetId));
+  const ownAssetIds = new Set(own.assetSnapshots.map((s) => s.asset_id));
+  const prevLiabilityIds = new Set((prevReport?.liabilityLines ?? []).map((line) => line.liabilityId));
+  const ownLiabilityIds = new Set(own.liabilitySnapshots.map((s) => s.liability_id));
+
   return {
     month: month.month,
     isBaseline: prev === null,
     members: data.members,
-    assets: data.assets,
-    liabilities: data.liabilities,
+    assets: data.assets.filter(
+      (asset) =>
+        prevAssetIds.has(asset.id) ||
+        ownAssetIds.has(asset.id) ||
+        !later.some((d) => d.assetSnapshots.some((s) => s.asset_id === asset.id)),
+    ),
+    liabilities: data.liabilities.filter(
+      (liability) =>
+        prevLiabilityIds.has(liability.id) ||
+        ownLiabilityIds.has(liability.id) ||
+        !later.some((d) => d.liabilitySnapshots.some((s) => s.liability_id === liability.id)),
+    ),
     planLines: planLinesFor(data, month),
     prevAssetSnapshots: (prevReport?.assetLines ?? []).map((line) => ({
       asset_id: line.assetId,
@@ -211,11 +237,26 @@ export function projectionBase(data: HouseholdData): ProjectionBase {
     };
   }
 
-  // 정산 전: 월초(직전 달 말) 값. 이번 달에 뒤늦게 등록한 기존 자산·부채는 적어 둔 월초 값을 쓴다.
+  // 정산 전: 이번 달을 계획대로 다시 굴린다.
+  //  - 아직 확인하지 않은 항목은 월초(직전 달 말) 값에서 출발한다.
+  //  - 이미 확인한 부채는 "이번 달 예정 원금을 갚으면 확인한 잔액이 되는" 값에서 출발한다
+  //    (이번 달에 새로 받은 대출, 중도 완납이 미래 계산에서 빠지지 않게).
+  //  - 이번 달에 처음 생긴 자산은 확인한 값을 쓴다. 기존 현금으로 산 자산이라면 정산이 끝날 때까지
+  //    그 금액이 잠시 이중으로 잡힐 수 있다 (정산을 마치면 사라지는 근사).
   return {
     startMonth: latest.month,
-    assetValues: Object.fromEntries(report.assetLines.map((line) => [line.assetId, line.openValue])),
-    liabilityBalances: Object.fromEntries(report.liabilityLines.map((line) => [line.liabilityId, line.openBalance])),
+    assetValues: Object.fromEntries(
+      report.assetLines.map((line) => [
+        line.assetId,
+        line.confirmed && line.openValue === 0 ? line.value : line.openValue,
+      ]),
+    ),
+    liabilityBalances: Object.fromEntries(
+      report.liabilityLines.map((line) => [
+        line.liabilityId,
+        line.confirmed ? line.balance + line.plannedPrincipal : line.openBalance,
+      ]),
+    ),
   };
 }
 
@@ -236,7 +277,7 @@ export function planForMonth(data: HouseholdData, ym: Ym): MonthPlan {
     for (const month of ymRange(base.startMonth, addMonths(ym, -1))) {
       for (const liability of data.liabilities) {
         const balance = balances[liability.id] ?? 0;
-        if (!liability.is_active || balance <= 0) continue;
+        if (balance <= 0) continue;
         balances[liability.id] = balance - scheduledPayment(liability, month, balance).principal;
       }
     }

@@ -127,6 +127,55 @@ describe("월급 배분", () => {
     expect(done.lines.some((line) => line.liabilityId === carLoan.id)).toBe(false);
   });
 
+  it("보관한 부채도 원금이 남아 있으면 상환 줄이 유지된다", () => {
+    const archived = { ...carLoan, is_active: false };
+    const withBalance = buildMonthPlan({
+      month: "2026-03",
+      members: [haneul, bada],
+      planItems: items,
+      liabilities: [archived, parentsLoan],
+      liabilityBalances: { [carLoan.id]: 20_000_000, [parentsLoan.id]: 30_000_000 },
+    });
+    expect(withBalance.members.find((m) => m.memberId === haneul.id)!.debtPrincipal).toBe(400_000);
+    // 잔액 기록이 없거나 0이면 계획에서 빠진다
+    const settled = buildMonthPlan({
+      month: "2026-03",
+      members: [haneul, bada],
+      planItems: items,
+      liabilities: [archived, parentsLoan],
+      liabilityBalances: { [parentsLoan.id]: 30_000_000 },
+    });
+    expect(settled.lines.some((line) => line.liabilityId === carLoan.id)).toBe(false);
+  });
+
+  it("공용통장에서 내는 대출과 공동 수입은 공동 주머니에 잡힌다", () => {
+    const mortgage = liability({
+      kind: "equal_principal",
+      name: "주택담보대출",
+      original_principal: 240_000_000,
+      annual_rate: 4.8,
+      term_months: 240,
+      start_month: "2026-01",
+    });
+    const plan = buildMonthPlan({
+      month: "2026-03",
+      members: [haneul, bada],
+      planItems: [...items, planItem({ kind: "income", amount: 300_000, income_type: "other", name: "공동 임대수입" })],
+      liabilities: [mortgage],
+      liabilityBalances: { [mortgage.id]: 238_000_000 },
+    });
+    expect(plan.joint.income).toBe(300_000);
+    expect(plan.joint.debtPrincipal).toBe(1_000_000);
+    expect(plan.joint.debtInterest).toBe(952_000);
+    // 공동저축 = 납입 350 + 수입 30 − 지출 180 − 원금 100 − 이자 95.2
+    expect(plan.joint.surplus).toBe(3_500_000 + 300_000 - 1_800_000 - 1_000_000 - 952_000);
+    expect(plan.totals.income).toBe(7_500_000);
+    expect(plan.totals.principalRepayment).toBe(1_000_000);
+    expect(plan.totals.income).toBe(plan.totals.consumption + plan.totals.savings + plan.totals.principalRepayment);
+    // 개인 사용 가능 금액에는 영향이 없다
+    expect(plan.members.find((m) => m.memberId === haneul.id)!.allowance).toBe(2_200_000);
+  });
+
   it("공동 주머니 줄은 pocket 이 joint 다", () => {
     expect(build().joint.lines.every((line) => line.pocket === JOINT)).toBe(true);
   });

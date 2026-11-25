@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { adminClient, anonClient, cleanup, createHousehold, createUser, one, type TestUser } from "./helpers";
+import { adminClient, adminSql, anonClient, cleanup, createHousehold, createUser, one, type TestUser } from "./helpers";
 
 const TABLES = [
   "households",
@@ -47,6 +47,34 @@ beforeAll(async () => {
   const month = await owner.client.from("months").select("*").single();
   expect(month.error).toBeNull();
   monthA = month.data;
+
+  // 격리 테스트가 공허해지지 않도록 A 가구의 모든 테이블에 행을 하나 이상 만든다
+  const must = async <T,>(query: PromiseLike<{ data: T | null; error: { message: string } | null }>): Promise<T> => {
+    const { data, error } = await query;
+    if (error || !data) throw new Error(`준비 실패: ${error?.message}`);
+    return data;
+  };
+  const c = owner.client;
+  const liability = await must<{ id: string }>(
+    c.from("liabilities").insert({ name: "A 대출", kind: "installment", original_principal: 1_000_000, monthly_payment: 100_000 }).select().single(),
+  );
+  const item = await must<{ id: string }>(
+    c.from("plan_items").insert({ kind: "expense", name: "A 지출", amount: 1 }).select().single(),
+  );
+  const extraAsset = await must<{ id: string }>(
+    c.from("assets").insert({ name: "A 예금", kind: "deposit", liquidity: "short" }).select().single(),
+  );
+  await must(c.from("asset_snapshots").insert({ month_id: monthA.id, asset_id: extraAsset.id, value: 1, principal: 1 }).select().single());
+  await must(c.from("liability_snapshots").insert({ month_id: monthA.id, liability_id: liability.id, balance: 1 }).select().single());
+  const entry = await must<{ id: string }>(
+    c.from("month_entries").insert({ month_id: monthA.id, kind: "expense", name: "A 실제 지출", amount: 1, plan_item_id: item.id }).select().single(),
+  );
+  const goal = await must<{ id: string }>(c.from("goals").insert({ name: "A 목표", target_amount: 1 }).select().single());
+  await must(c.from("goal_allocations").insert({ goal_id: goal.id, asset_id: extraAsset.id }).select().single());
+  await must(c.from("future_events").insert({ name: "A 이벤트", kind: "one_time", month: "2030-01" }).select().single());
+  // 월 마감 테스트에 영향을 주지 않도록 A 예금 스냅샷·실제 지출은 준비가 끝난 뒤 지우지 않고 그대로 둔다
+  void entry;
+  monthA = (await owner.client.from("months").select("*").eq("id", monthA.id).single()).data;
 });
 
 afterAll(cleanup);
@@ -98,13 +126,25 @@ describe("인증되지 않은 접근", () => {
 });
 
 describe("가구 간 격리", () => {
+  it("모든 테이블에 가구 A 의 행이 있다 (격리 테스트의 전제)", async () => {
+    for (const table of TABLES) {
+      const column = table === "households" ? "id" : "household_id";
+      const { data, error } = await owner.client.from(table).select("*").eq(column, householdA);
+      expect(error).toBeNull();
+      expect((data ?? []).length, `${table} 에 가구 A 행이 없다`).toBeGreaterThan(0);
+    }
+  });
+
   it("다른 가구의 데이터는 보이지 않는다", async () => {
     for (const table of TABLES) {
-      const { data, error } = await outsider.client.from(table).select("*");
+      const column = table === "households" ? "id" : "household_id";
+      const { data, error } = await outsider.client.from(table).select("*").eq(column, householdA);
       expect(error).toBeNull();
-      for (const row of data ?? []) {
-        const householdId = table === "households" ? row.id : row.household_id;
-        expect(householdId, `${table} 에서 다른 가구 행이 보임`).toBe(householdB);
+      expect(data, `${table} 에서 다른 가구 행이 보임`).toEqual([]);
+
+      const all = await outsider.client.from(table).select("*");
+      for (const row of all.data ?? []) {
+        expect(table === "households" ? row.id : row.household_id, `${table} 에서 다른 가구 행이 보임`).toBe(householdB);
       }
     }
     const direct = await outsider.client.from("assets").select("*").eq("id", assetA.id);
@@ -152,7 +192,11 @@ describe("가구 간 격리", () => {
   });
 
   it("다른 가구의 월을 마감하거나 다시 열 수 없다", async () => {
-    const close = await outsider.client.rpc("close_month", { p_month_id: monthA.id, p_summary: {}, p_version: monthA.version });
+    const close = await outsider.client.rpc("close_month", {
+      p_month_id: monthA.id,
+      p_summary: { complete: true },
+      p_version: monthA.version,
+    });
     expect(close.error?.message).toContain("month_not_found");
     const reopen = await outsider.client.rpc("reopen_month", { p_month_id: monthA.id });
     expect(reopen.error?.message).toContain("month_not_found");
@@ -214,19 +258,23 @@ describe("가구 구성과 초대", () => {
   });
 
   it("이메일 인증이 안 된 계정은 초대를 수락할 수 없다", async () => {
-    const unconfirmed = await createUser("unconfirmed", { confirmed: false });
+    const invitee = await createUser("unconfirmed");
     const inviter = await createUser("inviter");
-    await createHousehold(inviter, unconfirmed.email);
+    await createHousehold(inviter, invitee.email);
 
-    // 로컬 설정에서는 미인증 계정도 로그인은 될 수 있다. 로그인이 되더라도 연결되면 안 된다.
-    const signIn = await unconfirmed.client.auth.signInWithPassword({ email: unconfirmed.email, password: "test-password-1234" });
-    if (!signIn.error) {
-      const claim = await unconfirmed.client.rpc("claim_membership");
-      expect(claim.data).toBeNull();
-      expect((await unconfirmed.client.from("assets").select("*")).data).toEqual([]);
-    }
-    const { data } = await adminClient().from("members").select("user_id").eq("email", unconfirmed.email).single();
-    expect(data!.user_id).toBeNull();
+    // 로그인된 세션은 그대로 두고, 이메일 인증만 취소한다
+    adminSql(`update auth.users set email_confirmed_at = null where id = '${invitee.id}';`);
+    const blocked = await invitee.client.rpc("claim_membership");
+    expect(blocked.error).toBeNull();
+    expect(blocked.data).toBeNull();
+    expect((await invitee.client.from("assets").select("*")).data).toEqual([]);
+    const { data: row } = await adminClient().from("members").select("user_id").eq("email", invitee.email).single();
+    expect(row!.user_id).toBeNull();
+
+    // 인증을 되돌리면 연결된다 (위 단언이 공허하지 않음을 확인)
+    adminSql(`update auth.users set email_confirmed_at = now() where id = '${invitee.id}';`);
+    const allowed = await invitee.client.rpc("claim_membership");
+    expect(allowed.data).not.toBeNull();
   });
 });
 
@@ -290,7 +338,7 @@ describe("동시 수정 (낙관적 잠금)", () => {
 });
 
 describe("월 마감과 과거 데이터 보존", () => {
-  const summary = { version: 1, month: "2026-01", marker: "frozen" };
+  const summary = { version: 1, month: "2026-01", complete: true, marker: "frozen" };
 
   it("월을 직접 만들거나 상태·결과를 직접 바꿀 수 없다", async () => {
     const insert = await owner.client.from("months").insert({ month: "2030-01" });
@@ -306,7 +354,12 @@ describe("월 마감과 과거 데이터 보존", () => {
   it("입력이 바뀌면 월의 version 이 올라가 오래된 화면으로는 마감할 수 없다", async () => {
     const before = await one<{ version: number }>(owner.client, "months", monthA.id);
     // 배우자가 그 사이 잔액을 고쳤다
-    const snapshot = await partner.client.from("asset_snapshots").select("*").eq("month_id", monthA.id).single();
+    const snapshot = await partner.client
+      .from("asset_snapshots")
+      .select("*")
+      .eq("month_id", monthA.id)
+      .eq("asset_id", assetA.id)
+      .single();
     const edit = await partner.client
       .from("asset_snapshots")
       .update({ value: 1_200_000, principal: 1_200_000, version: snapshot.data.version })
@@ -319,6 +372,18 @@ describe("월 마감과 과거 데이터 보존", () => {
     expect(stale.error?.message).toContain("version_conflict");
     monthA = await one(owner.client, "months", monthA.id);
     expect(monthA.version).toBeGreaterThan(before.version);
+  });
+
+  it("미확인 항목이 남은 결과로는 마감할 수 없다", async () => {
+    const incomplete = await owner.client.rpc("close_month", {
+      p_month_id: monthA.id,
+      p_summary: { ...summary, complete: false },
+      p_version: monthA.version,
+    });
+    expect(incomplete.error?.message).toContain("month_incomplete");
+    const missing = await owner.client.rpc("close_month", { p_month_id: monthA.id, p_summary: { version: 1 }, p_version: monthA.version });
+    expect(missing.error?.message).toContain("month_incomplete");
+    expect((await one<{ status: string }>(owner.client, "months", monthA.id)).status).toBe("open");
   });
 
   it("마감하면 결과가 저장되고 다음 달이 열린다", async () => {
@@ -336,7 +401,9 @@ describe("월 마감과 과거 데이터 보존", () => {
   });
 
   it("마감된 달의 입력은 수정·추가·삭제할 수 없다", async () => {
-    const snapshot = (await owner.client.from("asset_snapshots").select("*").eq("month_id", monthA.id).single()).data;
+    const snapshot = (
+      await owner.client.from("asset_snapshots").select("*").eq("month_id", monthA.id).eq("asset_id", assetA.id).single()
+    ).data;
 
     const update = await owner.client
       .from("asset_snapshots")
@@ -355,7 +422,7 @@ describe("월 마감과 과거 데이터 보존", () => {
 
     const liability = await owner.client
       .from("liabilities")
-      .insert({ name: "대출", kind: "bullet", original_principal: 1_000_000 })
+      .insert({ name: "대출", kind: "installment", original_principal: 1_000_000, monthly_payment: 100_000 })
       .select()
       .single();
     const insertLiabilitySnapshot = await owner.client
@@ -390,7 +457,7 @@ describe("월 마감과 과거 데이터 보존", () => {
     // 2월도 마감 → 1월은 더 이상 다시 열 수 없다
     const closeFebruary = await owner.client.rpc("close_month", {
       p_month_id: february.id,
-      p_summary: { version: 1, month: "2026-02" },
+      p_summary: { version: 1, month: "2026-02", complete: true },
       p_version: february.version,
     });
     expect(closeFebruary.error).toBeNull();
@@ -401,7 +468,7 @@ describe("월 마감과 과거 데이터 보존", () => {
     const reopenFebruary = await partner.client.rpc("reopen_month", { p_month_id: february.id });
     expect(reopenFebruary.error).toBeNull();
     expect(reopenFebruary.data.status).toBe("open");
-    expect(reopenFebruary.data.summary).toEqual({ version: 1, month: "2026-02" });
+    expect(reopenFebruary.data.summary).toEqual({ version: 1, month: "2026-02", complete: true });
 
     // 열린 달이 2월·3월 둘인 상태에서 3월을 먼저 마감할 수 없다
     const march = (await owner.client.from("months").select("*").eq("month", "2026-03").single()).data;

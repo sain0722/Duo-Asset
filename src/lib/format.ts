@@ -78,12 +78,28 @@ export function formatDate(date: string): string {
   return date.slice(0, 10).replaceAll("-", ".");
 }
 
-/** 입력 문자열에서 숫자만 뽑아 원 단위 정수로. 비어 있으면 null (미입력 ≠ 0) */
+/**
+ * 입력 문자열을 원 단위 정수로.
+ * - 비어 있으면 null (미입력 ≠ 0)
+ * - "4,800,000", "4800000원", "1,234,567.00"(소수점 이하는 버림), "480만", "1억 2,000만", "1.5억" 을 읽는다
+ * - 해석할 수 없는 글자가 섞이면 틀린 숫자를 만들지 않고 null 을 돌려준다
+ */
 export function parseWonInput(text: string): Won | null {
-  const negative = /^\s*[-−]/.test(text);
-  const digits = text.replace(/[^\d]/g, "");
-  if (digits === "") return null;
-  const value = Number(digits);
+  const cleaned = text.replace(/[\s,원]/g, "");
+  if (cleaned === "") return null;
+  const negative = /^[-−]/.test(cleaned);
+  const body = cleaned.replace(/^[-−+]/, "");
+
+  let value: number;
+  if (/^\d+(\.\d+)?$/.test(body)) {
+    value = Math.trunc(Number(body));
+  } else {
+    const match = body.match(/^(?:(\d+(?:\.\d+)?)억)?(?:(\d+(?:\.\d+)?)만)?(\d+)?$/);
+    if (!match || (match[1] === undefined && match[2] === undefined)) return null;
+    value = Math.round(
+      Number(match[1] ?? 0) * 100_000_000 + Number(match[2] ?? 0) * 10_000 + Number(match[3] ?? 0),
+    );
+  }
   if (!Number.isSafeInteger(value)) return null;
   return negative ? -value : value;
 }

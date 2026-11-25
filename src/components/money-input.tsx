@@ -111,6 +111,17 @@ function MoneyInput({
       raw = raw.slice(0, caret) + raw.slice(caret + 1);
     }
 
+    // 붙여넣기 등으로 소수점·한국어 단위가 들어온 경우("1,234,567.00", "480만"):
+    // 숫자만 뽑으면 100배·1만 배 틀린 값이 되므로 통째로 해석하고, 해석할 수 없으면 받지 않는다.
+    if (/[.억만]/.test(raw)) {
+      const parsed = parseWonInput(raw);
+      const accepted =
+        parsed != null && String(Math.abs(parsed)).length <= MAX_DIGITS && (parsed >= 0 || allowNegative);
+      const nextText = accepted ? toText(parsed) : text;
+      commit(nextText, nextText.length);
+      return;
+    }
+
     const rawDigits = digitsOf(raw);
     if (rawDigits.length > MAX_DIGITS) {
       // 자릿수 초과 입력은 받지 않고 커서만 원래 자리로 돌린다.

@@ -57,8 +57,10 @@ export function buildPlanLines(args: {
   }
 
   for (const liability of [...liabilities].sort(bySortOrder)) {
-    if (!liability.is_active) continue;
-    const balance = liabilityBalances[liability.id] ?? liability.original_principal;
+    // 보관했더라도 원금이 남아 있으면 계속 갚아야 한다. 보관했고 잔액 정보가 없으면 건너뛴다.
+    const known = liabilityBalances[liability.id];
+    if (!liability.is_active && !(known !== undefined && known > 0)) continue;
+    const balance = known ?? liability.original_principal;
     const pay = scheduledPayment(liability, month, balance);
     if (pay.payment === 0) continue;
     lines.push({

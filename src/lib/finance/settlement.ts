@@ -57,7 +57,9 @@ function buildAssetLines(input: MonthInput): AssetLine[] {
     if (now) {
       value = now.value;
       principal = now.principal;
-      if (!before && now.opening_value !== null && now.opening_principal !== null) {
+      // 직전 달에 없었거나 0원으로만 있었던 자산
+      const noPrior = !before || (before.value === 0 && before.principal === 0);
+      if (noPrior && now.opening_value !== null && now.opening_principal !== null) {
         // 전부터 갖고 있던 자산을 이번 달에 처음 등록: 월초 값은 기초 조정으로 분리
         openValue = now.opening_value;
         openPrincipal = now.opening_principal;
@@ -119,7 +121,7 @@ function buildLiabilityLines(input: MonthInput): LiabilityLine[] {
 
     if (now) {
       balance = now.balance;
-      if (!before && now.opening_balance !== null) {
+      if ((!before || before.balance === 0) && now.opening_balance !== null) {
         openBalance = now.opening_balance;
         adjustment = now.opening_balance;
       }

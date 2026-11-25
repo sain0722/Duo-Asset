@@ -32,8 +32,14 @@ export async function insertRow<T>(table: TableName, values: Partial<NewRow<T>>)
     .insert(values as Record<string, unknown>)
     .select()
     .single();
-  if (error) throw toAppError(error);
+  if (error) throw insertError(error);
   return data as T;
+}
+
+/** 넣으려는 행이 가리키는 대상(자산·계획 항목 등)을 다른 기기에서 방금 지운 경우를 구분해 알린다 */
+function insertError(error: { code?: string; message?: string }): Error {
+  if (error.code === "23503") return new Error("연결된 항목이 이미 삭제되었습니다. 새로고침 후 다시 시도해 주세요.");
+  return toAppError(error);
 }
 
 /**
@@ -54,8 +60,10 @@ export async function updateRow<T extends Versioned>(table: TableName, row: Vers
 }
 
 export async function deleteRow(table: TableName, id: string): Promise<void> {
-  const { error } = await getSupabase().from(table).delete().eq("id", id);
+  const { data, error } = await getSupabase().from(table).delete().eq("id", id).select("id");
   if (error) throw toAppError(error);
+  // 지워진 행이 없다 = 이미 지워졌거나, 마감된 달이라 RLS 가 막았다. 성공으로 넘기지 않는다.
+  if (!data?.length) throw new ConflictError();
 }
 
 // ───────────────────────── 월별 입력 ─────────────────────────
@@ -129,7 +137,7 @@ async function insertOnce<T>(table: TableName, values: Record<string, unknown>):
   const { data, error } = await getSupabase().from(table).insert(values).select().single();
   if (error) {
     if (error.code === "23505") throw new ConflictError();
-    throw toAppError(error);
+    throw insertError(error);
   }
   return data as T;
 }
@@ -200,7 +208,11 @@ export function createHousehold(args: {
 }
 
 /** 월 마감: 화면에서 본 정산 결과(report)를 그대로 동결한다. */
-export function closeMonth(month: MonthRow, report: MonthReport): Promise<MonthRow> {
+export async function closeMonth(month: MonthRow, report: MonthReport): Promise<MonthRow> {
+  // 미확인 항목의 잠정값(계획 금액·전월 잔액)이 확정 결과로 동결되지 않게 한다
+  if (!report.complete || report.month !== month.month) {
+    throw new Error("미확인 항목이 남아 있어 마감할 수 없습니다.");
+  }
   return rpc<MonthRow>("close_month", {
     p_month_id: month.id,
     p_summary: report,

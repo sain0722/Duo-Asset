@@ -130,7 +130,12 @@ create table public.liabilities (
   updated_at timestamptz not null default now(),
   unique (household_id, id),
   foreign key (household_id, payer_member_id) references public.members (household_id, id),
-  foreign key (household_id, withdraw_asset_id) references public.assets (household_id, id)
+  foreign key (household_id, withdraw_asset_id) references public.assets (household_id, id),
+  -- 이자 있는 대출은 기간과 첫 납부 월이 있어야 예정 상환액을 계산할 수 있다
+  check (kind not in ('amortized', 'equal_principal', 'bullet') or (term_months is not null and start_month is not null)),
+  -- 무이자 할부는 월 납부액이나 기간 중 하나, 원금 유지 차용금은 월 지급액이나 이율 중 하나가 있어야 한다
+  check (kind <> 'installment' or monthly_payment is not null or term_months is not null),
+  check (kind <> 'interest_only' or monthly_payment is not null or annual_rate > 0)
 );
 
 create index liabilities_household_idx on public.liabilities (household_id);
@@ -308,7 +313,9 @@ create table public.goal_allocations (
   goal_id uuid not null,
   asset_id uuid not null,
   amount bigint check (amount >= 0),
+  version int not null default 1,
   created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
   unique (goal_id, asset_id),
   foreign key (household_id, goal_id) references public.goals (household_id, id) on delete cascade,
   foreign key (household_id, asset_id) references public.assets (household_id, id) on delete cascade
@@ -370,6 +377,8 @@ create trigger bump_version before update on public.liability_snapshots
 create trigger bump_version before update on public.month_entries
   for each row execute function public.bump_version();
 create trigger bump_version before update on public.goals
+  for each row execute function public.bump_version();
+create trigger bump_version before update on public.goal_allocations
   for each row execute function public.bump_version();
 create trigger bump_version before update on public.scenarios
   for each row execute function public.bump_version();
@@ -644,6 +653,10 @@ begin
   end if;
   if p_summary is null or jsonb_typeof(p_summary) <> 'object' then
     raise exception 'summary_required' using errcode = '22023';
+  end if;
+  -- 미확인 항목이 남은 결과(잠정값)는 확정하지 않는다
+  if (p_summary->>'complete') is distinct from 'true' then
+    raise exception 'month_incomplete' using errcode = '22023';
   end if;
 
   select * into v_month from public.months m

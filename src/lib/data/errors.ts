@@ -14,6 +14,14 @@ export class PermissionError extends Error {
   }
 }
 
+/** 서버에 닿지 못했다 (오프라인, 일시 장애) */
+export class NetworkError extends Error {
+  constructor() {
+    super("네트워크에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.");
+    this.name = "NetworkError";
+  }
+}
+
 interface PostgrestLikeError {
   code?: string;
   message?: string;
@@ -22,6 +30,7 @@ interface PostgrestLikeError {
 const RPC_MESSAGES: Record<string, string> = {
   version_conflict: "다른 기기에서 먼저 수정했습니다. 다시 확인해 주세요.",
   month_not_open: "이미 마감된 달입니다.",
+  month_incomplete: "미확인 항목이 남아 있어 마감할 수 없습니다.",
   month_not_closed: "마감되지 않은 달입니다.",
   earlier_month_open: "이전 달을 먼저 마감해 주세요.",
   later_month_closed: "가장 최근에 마감한 달만 다시 열 수 있습니다.",
@@ -37,6 +46,8 @@ const RPC_MESSAGES: Record<string, string> = {
 /** Supabase(PostgREST) 오류를 앱 오류로 바꾼다 */
 export function toAppError(error: PostgrestLikeError): Error {
   const message = error.message ?? "";
+  // supabase-js 는 fetch 실패를 던지지 않고 code 없는 오류 객체로 돌려준다
+  if (!error.code && /fetch|network|load failed/i.test(message)) return new NetworkError();
   if (error.code === "40001" || message.includes("version_conflict")) return new ConflictError();
   if (error.code === "42501") return new PermissionError();
   for (const [key, text] of Object.entries(RPC_MESSAGES)) {
@@ -50,11 +61,6 @@ export function toAppError(error: PostgrestLikeError): Error {
 
 /** 사용자에게 보여 줄 문구 */
 export function describeError(error: unknown): string {
-  if (error instanceof Error) {
-    if (error.message === "Failed to fetch" || error.name === "TypeError") {
-      return "네트워크에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.";
-    }
-    return error.message;
-  }
+  if (error instanceof Error && error.message) return error.message;
   return "알 수 없는 오류가 발생했습니다.";
 }

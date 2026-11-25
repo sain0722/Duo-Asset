@@ -74,6 +74,8 @@ export interface LiabilityKindMeta {
   /** 입력이 필요한 필드 */
   needsRate: boolean;
   needsTerm: boolean;
+  /** 첫 납부 월이 있어야 회차·만기를 계산할 수 있다 */
+  needsStart: boolean;
   needsMonthlyPayment: boolean;
 }
 
@@ -83,6 +85,7 @@ export const LIABILITY_KINDS: Record<LiabilityKind, LiabilityKindMeta> = {
     description: "매월 같은 금액의 원금을 갚습니다. 이자는 없습니다.",
     needsRate: false,
     needsTerm: true,
+    needsStart: false,
     needsMonthlyPayment: true,
   },
   amortized: {
@@ -90,6 +93,7 @@ export const LIABILITY_KINDS: Record<LiabilityKind, LiabilityKindMeta> = {
     description: "매월 같은 금액(원금+이자)을 냅니다.",
     needsRate: true,
     needsTerm: true,
+    needsStart: true,
     needsMonthlyPayment: false,
   },
   equal_principal: {
@@ -97,6 +101,7 @@ export const LIABILITY_KINDS: Record<LiabilityKind, LiabilityKindMeta> = {
     description: "매월 같은 원금에 남은 원금의 이자를 더해 냅니다.",
     needsRate: true,
     needsTerm: true,
+    needsStart: true,
     needsMonthlyPayment: false,
   },
   bullet: {
@@ -104,6 +109,7 @@ export const LIABILITY_KINDS: Record<LiabilityKind, LiabilityKindMeta> = {
     description: "매월 이자만 내고 만기에 원금을 한 번에 갚습니다.",
     needsRate: true,
     needsTerm: true,
+    needsStart: true,
     needsMonthlyPayment: false,
   },
   interest_only: {
@@ -111,6 +117,7 @@ export const LIABILITY_KINDS: Record<LiabilityKind, LiabilityKindMeta> = {
     description: "원금 상환 계획 없이 매월 정해진 금액(이자·용돈 등)만 지급합니다.",
     needsRate: false,
     needsTerm: false,
+    needsStart: false,
     needsMonthlyPayment: true,
   },
 };

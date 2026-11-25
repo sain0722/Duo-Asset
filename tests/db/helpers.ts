@@ -108,3 +108,18 @@ export async function one<T>(client: SupabaseClient, table: string, id: string):
   if (error) throw new Error(`${table} 조회 실패: ${error.message}`);
   return data as T;
 }
+
+/**
+ * 관리자 권한 SQL (auth 스키마처럼 API 로는 바꿀 수 없는 것을 테스트에서 조작할 때만 쓴다).
+ * 로컬 스택의 DB 컨테이너 안에서 psql 을 실행한다.
+ */
+export function adminSql(statement: string): string {
+  const container = execSync("docker ps --filter name=supabase_db_ --format '{{.Names}}'", { encoding: "utf8" })
+    .split("\n")
+    .find((name) => name.trim() !== "");
+  if (!container) throw new Error("로컬 Supabase DB 컨테이너를 찾지 못했습니다.");
+  return execSync(`docker exec -i ${container.trim()} psql -U postgres -d postgres -At -v ON_ERROR_STOP=1`, {
+    input: statement,
+    encoding: "utf8",
+  }).trim();
+}

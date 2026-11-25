@@ -46,6 +46,16 @@ describe("무이자 할부", () => {
     expect(scheduledPayment(loan, "2026-03", 0).payment).toBe(0);
   });
 
+  it("원금이 기간으로 나누어떨어지지 않아도 계약 기간 안에 끝난다", () => {
+    // 1,000만 원 ÷ 36개월 = 277,778원(반올림) → 마지막 회차에 남은 금액을 정리
+    const odd = liability({ kind: "installment", original_principal: 10_000_000, term_months: 36, start_month: "2026-01" });
+    const rows = buildSchedule(odd, "2026-01", 10_000_000);
+    expect(rows).toHaveLength(36);
+    expect(rows.at(-1)!.month).toBe(liabilityEndMonth(odd));
+    expect(rows.at(-1)!.balance).toBe(0);
+    expect(rows.reduce((total, row) => total + row.principal, 0)).toBe(10_000_000);
+  });
+
   it("월 납부액이 없으면 원금 ÷ 기간으로 계산한다", () => {
     const noPayment = { ...loan, monthly_payment: null };
     expect(scheduledPayment(noPayment, "2025-01", 36_000_000).principal).toBe(600_000);
@@ -83,10 +93,28 @@ describe("원리금균등", () => {
     expect(rows.reduce((total, row) => total + row.principal, 0)).toBe(100_000_000);
   });
 
-  it("중도상환하면 이후 이자가 줄고 더 일찍 끝난다", () => {
+  it("중도상환하면 만기는 그대로이고 월 납부액과 이자가 줄어든다", () => {
+    // 6번째 달에 잔액이 5천만 원으로 줄었다 (남은 235회차에 다시 나눈다)
     const afterPrepay = scheduledPayment(loan, "2026-06", 50_000_000);
     expect(afterPrepay.interest).toBe(200_000);
-    expect(payoffMonth(loan, "2026-06", 50_000_000)! < "2045-12").toBe(true);
+    expect(afterPrepay.payment).toBe(amortizedPayment(50_000_000, 4.8, 235));
+    expect(afterPrepay.payment).toBeLessThan(amortizedPayment(100_000_000, 4.8, 240));
+    expect(payoffMonth(loan, "2026-06", 50_000_000)).toBe("2045-12");
+  });
+
+  it("금리가 바뀌어도 남은 원금을 남은 기간에 맞춰 갚아 만기에 정확히 끝난다", () => {
+    const changed = { ...loan, annual_rate: 3.2 };
+    const rows = buildSchedule(changed, "2028-01", 93_000_000);
+    expect(rows.at(-1)!.month).toBe("2045-12");
+    expect(rows.at(-1)!.balance).toBe(0);
+    // 마지막 달에 원금이 한꺼번에 몰리지 않는다
+    expect(rows.at(-1)!.payment).toBeLessThan(rows[0].payment * 1.01);
+  });
+
+  it("첫 납부 월을 몰라도 원금을 0으로 두지 않는다", () => {
+    const noStart = { ...loan, start_month: null };
+    const pay = scheduledPayment(noStart, "2026-01", 100_000_000);
+    expect(pay.principal).toBe(amortizedPayment(100_000_000, 4.8, 240) - 400_000);
   });
 
   it("이율이 0이면 원금을 기간으로 나눈다", () => {

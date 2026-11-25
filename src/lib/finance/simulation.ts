@@ -171,7 +171,7 @@ interface Loan {
   name: string;
   liability: Liability;
   balance: Won;
-  /** 지금까지 낸 월 납부액 중 가장 큰 값 = 끝나면 생기는 월 여유 자금 */
+  /** 평소 월 납부액 = 끝나면 생기는 월 여유 자금 */
   regularPayment: Won;
 }
 
@@ -212,9 +212,16 @@ export function simulate(input: SimulationInput): SimulationResult {
   const { startMonth, members, planItems, assets, assumptions } = input;
   const horizon = Math.max(1, Math.round(assumptions.horizonYears * 12));
 
-  // 과거 날짜의 이벤트는 이미 일어난 일로 보고 건너뛴다
+  // 이미 지난 일회성 효과(일회 지출, 자산 취득, 대출 실행)는 현재 잔액에 반영돼 있으므로 버린다.
+  // 기간 효과(소득·지출 증감, 휴직 중 소득 대체)는 아직 끝나지 않았으면 계속 적용한다 —
+  // 이벤트가 현실이 되어 계획 항목에 반영했다면 사용자가 이벤트를 지우거나 꺼야 한다.
+  const effects = input.events.flatMap(expandEvent).filter((effect) =>
+    "month" in effect
+      ? compareYm(effect.month, startMonth) >= 0
+      : effect.to === null || compareYm(effect.to, startMonth) >= 0,
+  );
+  // 마일스톤으로 표시할 이벤트 (앞으로 일어날 것만)
   const events = input.events.filter((event) => compareYm(event.month, startMonth) >= 0);
-  const effects = events.flatMap(expandEvent);
 
   // 시작 상태
   let cash = 0;
@@ -235,7 +242,8 @@ export function simulate(input: SimulationInput): SimulationResult {
   }
 
   const loans: Loan[] = input.liabilities
-    .filter((liability) => liability.is_active && (input.liabilityBalances[liability.id] ?? 0) > 0)
+    // 보관 여부가 아니라 남은 원금으로 판단한다
+    .filter((liability) => (input.liabilityBalances[liability.id] ?? 0) > 0)
     .map((liability) => ({
       name: liability.name,
       liability,
@@ -340,8 +348,13 @@ export function simulate(input: SimulationInput): SimulationResult {
     for (const loan of loans) {
       if (loan.balance <= 0) continue;
       const pay = scheduledPayment(loan.liability, month, loan.balance);
+      // 끝나면 풀리는 월 납부액: 마지막 회차(잔액 정리분)가 아니라 평소 회차 기준.
+      // 만기일시상환은 매월 내던 이자만 풀린다.
+      const isFinal = pay.principal >= loan.balance;
+      if (!isFinal || loan.regularPayment === 0) {
+        loan.regularPayment = loan.liability.kind === "bullet" ? pay.interest : pay.payment;
+      }
       loan.balance -= pay.principal;
-      loan.regularPayment = Math.max(loan.regularPayment, pay.payment);
       principalPaid += pay.principal;
       interestPaid += pay.interest;
       if (loan.balance === 0) {

@@ -7,10 +7,22 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DEMO_PASSWORD, seedDemo, type SeedResult } from "../../scripts/seed-demo";
 import { currentPosition, history, lastClosedMonth, planForMonth, reportFor, workingMonth } from "@/lib/data/derive";
 import { ConflictError } from "@/lib/data/errors";
-import { closeMonth, deleteRow, insertRow, reopenMonth, restoreBackup, saveAssetSnapshot, updateRow } from "@/lib/data/mutations";
+import {
+  closeMonth,
+  createAssetWithSnapshot,
+  deleteRow,
+  insertRow,
+  reopenMonth,
+  restoreBackup,
+  saveAssetSnapshot,
+  saveEntry,
+  saveLiabilitySnapshot,
+  updateRow,
+} from "@/lib/data/mutations";
 import { exportBackup, fetchHousehold } from "@/lib/data/queries";
 import { setSupabaseClient } from "@/lib/data/supabase";
 import type { HouseholdData } from "@/lib/data/types";
+import { memberIdOf } from "@/lib/finance/meta";
 import type { Asset, Goal, PlanItem } from "@/lib/finance/types";
 import { adminClient, anonClient } from "./helpers";
 
@@ -185,18 +197,98 @@ describe("동시 수정", () => {
   });
 
   it("배우자가 입력을 바꾼 뒤에는 오래된 화면의 결과로 마감할 수 없다", async () => {
-    const stale = await loadAs(owner);
-    const open = workingMonth(stale)!;
-    const staleReport = reportFor(stale, open);
+    // 먼저 이번 달의 미확인 항목을 모두 확인해 마감할 수 있는 상태로 만든다
+    let data = await loadAs(owner);
+    const open = workingMonth(data)!;
+    const pending = reportFor(data, open);
+    await Promise.all([
+      ...pending.assetLines
+        .filter((line) => !line.confirmed)
+        .map((line) => saveAssetSnapshot(open.id, line.assetId, undefined, { value: line.value, principal: line.principal })),
+      ...pending.liabilityLines
+        .filter((line) => !line.confirmed)
+        .map((line) => saveLiabilitySnapshot(open.id, line.liabilityId, undefined, { balance: line.balance })),
+      ...[...pending.incomeLines.map((line) => ({ line, kind: "income" as const })), ...pending.contributionLines.map((line) => ({ line, kind: "contribution" as const }))]
+        .filter(({ line }) => line.actual === null)
+        .map(({ line, kind }) =>
+          saveEntry(open.id, undefined, {
+            kind,
+            member_id: memberIdOf(line.pocket),
+            plan_item_id: line.key,
+            name: line.name,
+            amount: line.planned ?? 0,
+          }),
+        ),
+    ]);
+    data = await loadAs(owner);
+    const stale = workingMonth(data)!;
+    const staleReport = reportFor(data, stale);
+    expect(staleReport.complete).toBe(true);
 
-    setSupabaseClient(partner);
+    // 그 사이 배우자가 잔액 하나를 고쳤다
     const theirs = await loadAs(partner);
     const snapshot = theirs.monthData[open.id].assetSnapshots[0];
     await saveAssetSnapshot(open.id, snapshot.asset_id, snapshot, { value: snapshot.value + 1, principal: snapshot.principal + 1 });
 
     setSupabaseClient(owner);
-    await expect(closeMonth(open, staleReport)).rejects.toBeInstanceOf(ConflictError);
+    await expect(closeMonth(stale, staleReport)).rejects.toBeInstanceOf(ConflictError);
+    const latest = await loadAs(owner);
+    expect(workingMonth(latest)!.id).toBe(open.id);
+
+    // 최신 값을 다시 읽으면 마감된다
+    const fresh = workingMonth(latest)!;
+    await expect(closeMonth(fresh, reportFor(latest, fresh))).resolves.toMatchObject({ status: "closed" });
+    expect(workingMonth(await loadAs(owner))!.month > open.month).toBe(true);
+  });
+});
+
+describe("마감과 오류 처리", () => {
+  it("미확인 항목이 남은 달은 마감할 수 없다", async () => {
+    const data = await loadAs(owner);
+    const open = workingMonth(data)!;
+    const report = reportFor(data, open);
+    expect(report.complete).toBe(false);
+    await expect(closeMonth(open, report)).rejects.toThrow("미확인 항목이 남아");
+    // 다른 달의 결과를 넘겨도 거부한다
+    const other = lastClosedMonth(data)!.summary!;
+    await expect(closeMonth(open, other)).rejects.toThrow("미확인 항목이 남아");
     expect(workingMonth(await loadAs(owner))!.id).toBe(open.id);
+  });
+
+  it("마감된 달의 입력을 고치려 하면 조용히 넘어가지 않고 오류로 알린다", async () => {
+    setSupabaseClient(owner);
+    const backup = await exportBackup();
+    const closed = backup.months.find((m) => m.status === "closed")!;
+    const snapshot = backup.assetSnapshots.find((s) => s.month_id === closed.id)!;
+    await expect(saveAssetSnapshot(closed.id, snapshot.asset_id, snapshot, { value: 1, principal: 1 })).rejects.toBeInstanceOf(
+      ConflictError,
+    );
+    await expect(deleteRow("asset_snapshots", snapshot.id)).rejects.toBeInstanceOf(ConflictError);
+    // 새 자산을 마감된 달에 등록하려 하면 실패하고, 자산만 덩그러니 남지 않는다
+    const before = (await loadAs(owner)).assets.length;
+    await expect(
+      createAssetWithSnapshot({
+        asset: { name: "마감된 달에 등록", kind: "cash", liquidity: "liquid", owner_member_id: null },
+        monthId: closed.id,
+        value: 1,
+        principal: 1,
+        existedBefore: false,
+      }),
+    ).rejects.toThrow();
+    expect((await loadAs(owner)).assets).toHaveLength(before);
+    // 값은 그대로다
+    const after = await exportBackup();
+    expect(after.assetSnapshots.find((s) => s.id === snapshot.id)!.value).toBe(snapshot.value);
+  });
+
+  it("이자 있는 대출은 기간과 첫 납부 월 없이 등록할 수 없다", async () => {
+    setSupabaseClient(owner);
+    await expect(
+      insertRow("liabilities", { name: "주담대", kind: "amortized", original_principal: 100_000_000, annual_rate: 4 }),
+    ).rejects.toThrow("입력값이 올바르지 않습니다");
+    await expect(
+      insertRow("liabilities", { name: "원금 없는 지급", kind: "interest_only", original_principal: 0, monthly_payment: 100_000 }),
+    ).rejects.toThrow("입력값이 올바르지 않습니다");
   });
 });
 
@@ -233,8 +325,8 @@ describe("백업과 복원", () => {
     await deleteRow("goals", data.goals[0].id);
     await updateRow<Asset>("assets", data.assets[0], { name: "망가진 이름" });
     const open = workingMonth(data)!;
-    const snapshot = data.monthData[open.id].assetSnapshots[0];
-    await saveAssetSnapshot(open.id, snapshot.asset_id, snapshot, { value: 1, principal: 1 });
+    const existing = data.monthData[open.id].assetSnapshots.find((s) => s.asset_id === data.assets[1].id);
+    await saveAssetSnapshot(open.id, data.assets[1].id, existing, { value: 1, principal: 1 });
     await insertRow<Goal>("goals", { name: "백업 뒤에 만든 목표", target_amount: 1 });
 
     await restoreBackup(backup);

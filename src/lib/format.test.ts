@@ -35,10 +35,25 @@ describe("금액 표기", () => {
 
   it("입력 파싱: 빈 값은 null 이고 0 과 구분된다", () => {
     expect(parseWonInput("4,800,000")).toBe(4_800_000);
-    expect(parseWonInput("480만")).toBe(480);
+    expect(parseWonInput("4800000원")).toBe(4_800_000);
     expect(parseWonInput("")).toBeNull();
     expect(parseWonInput("원")).toBeNull();
     expect(parseWonInput("0")).toBe(0);
     expect(parseWonInput("-50,000")).toBe(-50_000);
+    expect(parseWonInput("−50,000")).toBe(-50_000);
+  });
+
+  it("입력 파싱: 한국어 단위와 소수점을 틀린 숫자로 만들지 않는다", () => {
+    expect(parseWonInput("480만")).toBe(4_800_000);
+    expect(parseWonInput("1억 2,000만")).toBe(120_000_000);
+    expect(parseWonInput("1.5억")).toBe(150_000_000);
+    expect(parseWonInput("69.2만")).toBe(692_000);
+    expect(parseWonInput("3억 500")).toBe(300_000_500);
+    // 은행 앱·엑셀에서 복사한 값: 소수점 이하는 버린다 (100배로 읽지 않는다)
+    expect(parseWonInput("1,234,567.00")).toBe(1_234_567);
+    // 해석할 수 없으면 미입력으로
+    expect(parseWonInput("약 480")).toBeNull();
+    expect(parseWonInput("12a34")).toBeNull();
+    expect(parseWonInput("1.2.3")).toBeNull();
   });
 });

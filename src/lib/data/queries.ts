@@ -13,7 +13,7 @@ import type {
   PlanItem,
   Scenario,
 } from "@/lib/finance/types";
-import { toAppError } from "./errors";
+import { NetworkError, toAppError } from "./errors";
 import { getSupabase } from "./supabase";
 import type { BackupFile, HouseholdData, MonthData } from "./types";
 
@@ -64,6 +64,8 @@ export async function fetchHousehold(): Promise<HouseholdData | null> {
     data: { user },
     error: authError,
   } = await supabase.auth.getUser();
+  // 오프라인·일시 장애를 "로그아웃됨"으로 오해하지 않게 구분한다
+  if (authError?.name === "AuthRetryableFetchError") throw new NetworkError();
   if (authError || !user) throw new Error("로그인이 필요합니다.");
 
   const members = await selectAll<Member>("members", "sort_order");
