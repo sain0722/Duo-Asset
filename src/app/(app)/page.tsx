@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
-import { HomePlaceholder } from "./home-placeholder";
+import { HomeDashboard } from "@/features/home/home-dashboard";
 
 export const metadata: Metadata = { title: "홈" };
 
 export default function HomePage() {
-  return <HomePlaceholder />;
+  return <HomeDashboard />;
 }
