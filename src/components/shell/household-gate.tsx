@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { leaveIfSignedOut } from "@/lib/data/auth";
 import { describeError } from "@/lib/data/errors";
+import { useMounted } from "@/hooks/use-mounted";
 import { HouseholdProvider, useHouseholdQuery } from "@/lib/data/hooks";
 
 /**
@@ -24,6 +25,7 @@ import { HouseholdProvider, useHouseholdQuery } from "@/lib/data/hooks";
 export function HouseholdGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { data, error, isError, isFetching, isPaused, refetch } = useHouseholdQuery();
+  const mounted = useMounted();
 
   // 온보딩에서 가구를 만든 직후에는 캐시에 예전 값(null)이 남아 있을 수 있다. 다시 읽는 동안에는 판단을 미룬다.
   const hasNoHousehold = data === null && !isFetching;
@@ -37,7 +39,8 @@ export function HouseholdGate({ children }: { children: React.ReactNode }) {
     if (failed) void leaveIfSignedOut();
   }, [failed]);
 
-  if (data) return <HouseholdProvider value={data}>{children}</HouseholdProvider>;
+  // 하이드레이션 중에는 서버가 보낸 것과 같은 스켈레톤을 그린다 (그 사이 데이터가 도착했더라도)
+  if (data && mounted) return <HouseholdProvider value={data}>{children}</HouseholdProvider>;
 
   // isPaused: 오프라인이라 요청을 보내지 못하고 기다리는 중(연결되면 자동으로 이어진다)
   const offline = isPaused && data === undefined;

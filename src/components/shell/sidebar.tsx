@@ -6,6 +6,7 @@ import { Logo } from "@/components/logo";
 import { PocketBadge } from "@/components/pocket-badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useHouseholdQuery } from "@/lib/data/hooks";
+import { useMounted } from "@/hooks/use-mounted";
 import { cn } from "@/lib/utils";
 
 import { isActivePath, SETTINGS_ITEM, SIDEBAR_ITEMS, type NavItem } from "./nav";
@@ -33,8 +34,10 @@ function SidebarLink({ item, active }: { item: NavItem; active: boolean }) {
 /** 로그인한 사람. 가구 데이터가 오기 전에는 같은 크기의 스켈레톤. */
 function CurrentUser() {
   const { data } = useHouseholdQuery();
+  // 하이드레이션이 늦게 시작되면 그 사이 데이터가 도착해 서버 HTML(스켈레톤)과 어긋날 수 있다
+  const mounted = useMounted();
 
-  if (!data) {
+  if (!mounted || !data) {
     return (
       <div className="flex h-14 flex-col justify-center gap-2 px-3">
         <Skeleton className="h-4 w-20" />
