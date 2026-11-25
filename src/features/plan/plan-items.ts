@@ -4,7 +4,7 @@
 import { isPlanItemActive } from "@/lib/finance/plan";
 import type { PlanItem, Ym } from "@/lib/finance/types";
 import { formatYmShort } from "@/lib/format";
-import { addMonths, compareYm, ymParts } from "@/lib/month";
+import { addMonths, compareYm } from "@/lib/month";
 
 /** "1·7월" */
 export function monthsLabel(months: number[]): string {
@@ -51,7 +51,3 @@ export function splitPlanItem(item: PlanItem, from: Ym): { endPrevious: Pick<Pla
 /** 특정 월만(months_of_year) 표기용: 1~12 */
 export const MONTH_NUMBERS = Array.from({ length: 12 }, (_, i) => i + 1);
 
-/** 그 달이 months_of_year 에 들어 있는가 */
-export function inMonths(months: number[] | null, month: Ym): boolean {
-  return months == null || months.includes(ymParts(month).month);
-}
