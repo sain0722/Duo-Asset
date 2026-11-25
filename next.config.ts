@@ -43,6 +43,8 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // 개발 서버를 http://127.0.0.1:3000 으로 열어도 HMR 이 동작하게 한다 (기본은 localhost 만 허용)
+  allowedDevOrigins: ["127.0.0.1"],
   cacheComponents: true,
   partialPrefetching: true,
   poweredByHeader: false,

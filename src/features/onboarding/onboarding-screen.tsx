@@ -211,7 +211,7 @@ function CreateHouseholdForm({ className }: { className?: string }) {
         </FormField>
         <FormField
           label="기준 월"
-          description="기준 월 말의 잔액이 출발점입니다. 수입·소비 분석은 그다음 달 정산부터 제공됩니다. 이번 달 초라면 지난달을, 아니면 이번 달을 고르세요."
+          description="기준 월 말일의 잔액이 출발점입니다. 지난달을 고르면 지난달 말 잔액을 입력해 바로 시작할 수 있고, 이번 달 정산부터 수입·소비 분석이 나옵니다. 이번 달을 고르면 이번 달이 끝난 뒤에 시작됩니다."
         >
           {(_, { labelId }) => (
             <SegmentedControl aria-labelledby={labelId} fullWidth options={monthOptions} value={startMonth} onValueChange={setStartMonth} />

@@ -1,6 +1,7 @@
 import type {
   Asset,
   AssetSnapshot,
+  Household,
   LiabilitySnapshot,
   Member,
   MonthEntry,
@@ -70,28 +71,35 @@ export async function deleteRow(table: TableName, id: string): Promise<void> {
 
 // ───────────────────────── 가구 · 구성원 ─────────────────────────
 // 이 두 테이블에는 version 이 없다 (이름·초대 이메일만 고친다).
+// 잠금 대신 "읽었던 값이 그대로일 때만" 고친다: 다른 기기에서 먼저 바꿨다면 고쳐진 행이 없어 ConflictError.
 
-export async function updateHouseholdName(householdId: string, name: string): Promise<void> {
+export async function renameHousehold(household: Household, name: string): Promise<Household> {
   const { data, error } = await getSupabase()
     .from("households")
     .update({ name: name.trim() })
-    .eq("id", householdId)
-    .select("id");
+    .eq("id", household.id)
+    .eq("name", household.name)
+    .select()
+    .maybeSingle();
   if (error) throw toAppError(error);
-  if (!data?.length) throw new ConflictError();
+  if (!data) throw new ConflictError();
+  return data as Household;
 }
 
-/** 구성원 이름·초대 이메일을 고친다. 이메일은 소문자로 저장하고, 비우면 초대를 취소한다(null). */
-export async function updateMember(
-  memberId: string,
-  patch: { name?: string; email?: string | null },
-): Promise<Member> {
-  const values: { name?: string; email?: string | null } = {};
-  if (patch.name !== undefined) values.name = patch.name.trim();
-  if (patch.email !== undefined) values.email = patch.email?.trim().toLowerCase() || null;
-  const { data, error } = await getSupabase().from("members").update(values).eq("id", memberId).select().maybeSingle();
+/**
+ * 구성원 이름·초대 이메일을 고친다. 이메일은 앞뒤 공백을 떼고 소문자로 저장하며, 비우면 초대를 취소한다(null).
+ * email 을 넘기지 않으면 이름만 바꾼다 (이미 연결된 구성원).
+ */
+export async function updateMember(member: Member, patch: { name: string; email?: string | null }): Promise<Member> {
+  const values =
+    patch.email === undefined
+      ? { name: patch.name.trim() }
+      : { name: patch.name.trim(), email: patch.email?.trim().toLowerCase() || null };
+  let query = getSupabase().from("members").update(values).eq("id", member.id).eq("name", member.name);
+  query = member.email === null ? query.is("email", null) : query.eq("email", member.email);
+  const { data, error } = await query.select().maybeSingle();
   if (error) {
-    if (error.code === "23505") throw new Error("이미 다른 구성원에게 쓰인 이메일입니다.");
+    if (error.code === "23505") throw new Error("이미 다른 구성원이 쓰고 있는 이메일입니다.");
     throw toAppError(error);
   }
   if (!data) throw new ConflictError();

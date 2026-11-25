@@ -13,7 +13,7 @@ import { pocketTone } from "@/lib/data/derive";
 import { useHousehold, useMutate } from "@/lib/data/hooks";
 import type { Member } from "@/lib/finance/types";
 
-import { renameHousehold, updateMember } from "./household-api";
+import { renameHousehold, updateMember } from "@/lib/data/mutations";
 import { SettingRow } from "./setting-row";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
