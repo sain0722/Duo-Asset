@@ -352,7 +352,8 @@ export function computeMonthReport(input: MonthInput): MonthReport {
         .filter((line) => line.plannedInterest > 0 || line.interestPaid !== null)
         .map((line) => ({
           key: `liability:${line.liabilityId}:interest`,
-          name: `${line.name} 이자`,
+          // 원금 유지 차용금은 이자가 아니라 정해진 지급액(용돈 등)이다
+          name: line.kind === "interest_only" ? `${line.name} 지급액` : `${line.name} 이자`,
           pocket,
           planned: line.plannedInterest > 0 ? line.plannedInterest : null,
           actual: line.interestPaid,

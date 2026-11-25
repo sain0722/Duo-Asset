@@ -1204,7 +1204,7 @@ describe("월 정산: 이자의 미확인과 0원 (1절 5항·5절)", () => {
     const confirmedZero = run(free, 0, 3_000_000);
     expect(confirmedZero.liabilityLines[0]).toMatchObject({ plannedInterest: 0, interestPaid: 0 });
     expect(confirmedZero.pockets[0].expenseLines).toEqual([
-      { key: `liability:${free.id}:interest`, name: "무이자 차용금 이자", pocket: m.id, planned: null, actual: 0 },
+      { key: `liability:${free.id}:interest`, name: "무이자 차용금 지급액", pocket: m.id, planned: null, actual: 0 },
     ]);
     expect(confirmedZero.pockets[0].classified).toBe(0);
 
@@ -1221,7 +1221,7 @@ describe("월 정산: 이자의 미확인과 0원 (1절 5항·5절)", () => {
     // 급여 300 − 실제로 나간 돈 100 = 통장 +200
     const report = run(loan, null, 3_000_000);
     expect(report.pockets[0].expenseLines).toEqual([
-      { key: `liability:${loan.id}:interest`, name: "차용금 이자", pocket: m.id, planned: 250_000, actual: null },
+      { key: `liability:${loan.id}:interest`, name: "차용금 지급액", pocket: m.id, planned: 250_000, actual: null },
     ]);
     expect(report.pockets[0].consumption).toBe(1_000_000);
     expect(report.pockets[0].classified).toBe(0);
