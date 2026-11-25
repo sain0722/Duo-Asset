@@ -2,7 +2,7 @@
  * 로컬 Supabase 에 가상의 부부 데이터를 넣는다 (개발·E2E 테스트용).
  *
  *   npx supabase start
- *   npm run seed            # 계정 2개 + 6개월치 기록 생성, 로그인 정보 출력
+ *   npm run seed            # 계정 2개 + 6개월치 기록 생성, 로그인 정보 출력 (scripts/seed.ts)
  *
  * - 모든 이름과 금액은 가상의 값이다. 실제 데이터를 여기에 적지 않는다.
  * - 앱과 같은 데이터 계층(lib/data)과 계산 코드(lib/finance)를 써서 월을 마감하므로,
@@ -12,7 +12,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
 import { reportFor, workingMonth } from "@/lib/data/derive";
 import {
   claimMembership,
@@ -346,12 +345,4 @@ export async function seedDemo(options: { suffix?: string; closedMonths?: number
   log(`  배우자 ${partnerEmail}`);
   log(`  비밀번호 ${DEMO_PASSWORD}`);
   return { householdId, ownerEmail, partnerEmail, password: DEMO_PASSWORD };
-}
-
-// `npx tsx scripts/seed-demo.ts [suffix]` 로 직접 실행한 경우
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  seedDemo({ suffix: process.argv[2] }).catch((error) => {
-    console.error(error instanceof Error ? error.message : error);
-    process.exit(1);
-  });
 }

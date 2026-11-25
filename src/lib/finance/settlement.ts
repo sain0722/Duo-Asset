@@ -43,7 +43,9 @@ function buildAssetLines(input: MonthInput): AssetLine[] {
   for (const asset of input.assets) {
     const before = prev.get(asset.id);
     const now: AssetSnapshot | undefined = cur.get(asset.id);
-    if (!before && !now && !asset.is_active) continue;
+    // 보관했고 남은 금액도 없는 자산은 더 이상 집계하지 않는다.
+    // 금액이 남아 있으면 보관 여부와 관계없이 계속 집계한다 (0을 기록해야 정리된다).
+    if (!now && !asset.is_active && (!before || before.value === 0)) continue;
 
     let openValue = before?.value ?? 0;
     let openPrincipal = before?.principal ?? 0;
@@ -61,16 +63,11 @@ function buildAssetLines(input: MonthInput): AssetLine[] {
         openPrincipal = now.opening_principal;
         adjustment = now.opening_value;
       }
-    } else if (asset.is_active) {
+    } else {
       // 미확인: 월초 값이 그대로라고 가정
       value = openValue;
       principal = openPrincipal;
       confirmed = false;
-    } else {
-      // 보관(해지·매각)한 자산: 남은 평가금액을 전액 인출한 것으로 본다
-      if (openValue === 0) continue;
-      value = 0;
-      principal = openPrincipal - openValue;
     }
 
     if (input.isBaseline) {
@@ -112,7 +109,8 @@ function buildLiabilityLines(input: MonthInput): LiabilityLine[] {
   for (const liability of input.liabilities) {
     const before = prev.get(liability.id);
     const now: LiabilitySnapshot | undefined = cur.get(liability.id);
-    if (!before && !now && !liability.is_active) continue;
+    // 보관했고 남은 원금도 없는 부채는 집계하지 않는다. 원금이 남아 있으면 계속 집계한다.
+    if (!now && !liability.is_active && (!before || before.balance === 0)) continue;
 
     let openBalance = before?.balance ?? 0;
     let adjustment = 0;
@@ -125,13 +123,9 @@ function buildLiabilityLines(input: MonthInput): LiabilityLine[] {
         openBalance = now.opening_balance;
         adjustment = now.opening_balance;
       }
-    } else if (liability.is_active) {
+    } else {
       balance = openBalance;
       confirmed = false;
-    } else {
-      // 보관한 부채: 남은 원금을 모두 갚은 것으로 본다
-      if (openBalance === 0) continue;
-      balance = 0;
     }
 
     if (input.isBaseline) {
@@ -372,6 +366,13 @@ export function computeMonthReport(input: MonthInput): MonthReport {
           ? plannedMemberConsumption(memberPlan)
           : 0;
 
+    if (consumption >= 0 && consumption - classified < 0) {
+      warnings.push({
+        code: "negative_unclassified",
+        message: `${pocketName(pocket)} 주머니에서 실제로 나간 돈보다 확인한 지출이 많습니다. 다른 주머니에서 낸 지출이 섞였는지 확인하세요.`,
+        pocket,
+      });
+    }
     if (consumption < 0) {
       warnings.push({
         code: "negative_pocket_consumption",
@@ -398,8 +399,10 @@ export function computeMonthReport(input: MonthInput): MonthReport {
 
   const income = sumOf(pockets, (p) => p.income);
   const consumption = sumOf(pockets, (p) => p.consumption);
-  const principalRepaid = sumOf(liabilityLines, (line) => Math.max(line.principalPaid, 0));
-  const newBorrowing = sumOf(liabilityLines, (line) => Math.max(-line.principalPaid, 0));
+  // 가구 합계는 순액으로 본다: 같은 달에 한 대출을 갚고 다른 대출을 받아도(대환·입주) 저축액이 튀지 않는다
+  const netRepayment = sumOf(liabilityLines, (line) => line.principalPaid);
+  const principalRepaid = Math.max(netRepayment, 0);
+  const newBorrowing = Math.max(-netRepayment, 0);
   const savings = income - consumption - principalRepaid;
 
   if (consumption < 0) {

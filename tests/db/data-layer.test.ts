@@ -2,7 +2,7 @@
  * 데이터 계층(lib/data)을 실제 로컬 Supabase 에 붙여 검증한다.
  * 가상 데이터 시드로 여러 달을 정산·마감한 뒤, 과거 데이터 보존과 동시 수정 처리를 확인한다.
  */
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DEMO_PASSWORD, seedDemo, type SeedResult } from "../../scripts/seed-demo";
 import { currentPosition, history, lastClosedMonth, planForMonth, reportFor, workingMonth } from "@/lib/data/derive";

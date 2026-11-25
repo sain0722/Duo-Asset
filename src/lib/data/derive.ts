@@ -30,7 +30,7 @@ import type {
   Ym,
 } from "@/lib/finance/types";
 import { JOINT } from "@/lib/finance/types";
-import { addMonths, compareYm, ymRange } from "@/lib/month";
+import { addMonths, compareYm, currentYm, ymRange } from "@/lib/month";
 import { EMPTY_MONTH_DATA, type HouseholdData } from "./types";
 
 // ───────────────────────── 월 탐색 ─────────────────────────
@@ -106,12 +106,21 @@ export function planLinesFor(data: HouseholdData, month: MonthRow): PlanLine[] {
 
 /** 그 달 월초의 부채 잔액 (= 직전 달 말 잔액). 기준 월은 그 달에 입력한 잔액. */
 function openingLiabilityBalances(data: HouseholdData, month: MonthRow): Record<string, Won> {
+  const own = data.monthData[month.id] ?? EMPTY_MONTH_DATA;
   const prev = previousMonth(data, month);
   if (!prev) {
-    const own = data.monthData[month.id] ?? EMPTY_MONTH_DATA;
     return Object.fromEntries(own.liabilitySnapshots.map((s) => [s.liability_id, s.balance]));
   }
-  return Object.fromEntries(reportFor(data, prev).liabilityLines.map((line) => [line.liabilityId, line.balance]));
+  const balances: Record<string, Won> = Object.fromEntries(
+    reportFor(data, prev).liabilityLines.map((line) => [line.liabilityId, line.balance]),
+  );
+  // 전부터 있던 부채를 이번 달에 처음 등록했다면 적어 둔 월초 잔액을 쓴다
+  for (const snapshot of own.liabilitySnapshots) {
+    if (!(snapshot.liability_id in balances) && snapshot.opening_balance !== null) {
+      balances[snapshot.liability_id] = snapshot.opening_balance;
+    }
+  }
+  return balances;
 }
 
 export function monthInputFor(data: HouseholdData, month: MonthRow): MonthInput {
@@ -173,6 +182,43 @@ export function currentPosition(data: HouseholdData): Position {
   };
 }
 
+// ───────────────────────── 미래 계산의 출발점 ─────────────────────────
+
+export interface ProjectionBase {
+  /** 미래 계산을 시작하는 달 */
+  startMonth: Ym;
+  /** startMonth 월초의 자산 평가금액 · 부채 잔액 */
+  assetValues: Record<string, Won>;
+  liabilityBalances: Record<string, Won>;
+}
+
+/**
+ * 시뮬레이션과 미래 달 계획의 출발점.
+ * 가장 최근 달의 정산이 끝났으면(미확인 없음) 그 달 말 잔액에서 다음 달부터,
+ * 아직이면 직전 달 말 잔액에서 그 달부터 시작한다 — 정산 전인 달의 저축·상환을 건너뛰지 않기 위해서다.
+ */
+export function projectionBase(data: HouseholdData): ProjectionBase {
+  const latest = latestMonth(data);
+  if (!latest) return { startMonth: currentYm(), assetValues: {}, liabilityBalances: {} };
+
+  const report = reportFor(data, latest);
+  const prev = previousMonth(data, latest);
+  if (!prev || report.complete) {
+    return {
+      startMonth: addMonths(latest.month, 1),
+      assetValues: Object.fromEntries(report.assetLines.map((line) => [line.assetId, line.value])),
+      liabilityBalances: Object.fromEntries(report.liabilityLines.map((line) => [line.liabilityId, line.balance])),
+    };
+  }
+
+  // 정산 전: 월초(직전 달 말) 값. 이번 달에 뒤늦게 등록한 기존 자산·부채는 적어 둔 월초 값을 쓴다.
+  return {
+    startMonth: latest.month,
+    assetValues: Object.fromEntries(report.assetLines.map((line) => [line.assetId, line.openValue])),
+    liabilityBalances: Object.fromEntries(report.liabilityLines.map((line) => [line.liabilityId, line.openBalance])),
+  };
+}
+
 // ───────────────────────── 계획 ─────────────────────────
 
 /**
@@ -183,13 +229,11 @@ export function planForMonth(data: HouseholdData, ym: Ym): MonthPlan {
   const row = findMonth(data, ym);
   if (row) return summarizePlan(ym, data.members, planLinesFor(data, row));
 
-  const latest = latestMonth(data);
-  let balances = currentPosition(data).liabilityBalances;
-  if (latest && compareYm(ym, latest.month) > 0) {
-    // 마지막 기록 이후 ym 직전까지 예정대로 갚았다고 보고 잔액을 굴린다
-    balances = { ...balances };
-    const between = ymRange(addMonths(latest.month, 1), addMonths(ym, -1));
-    for (const month of between) {
+  // 미래 달: 출발점부터 ym 직전까지 예정대로 갚았다고 보고 부채 잔액을 굴린다
+  const base = projectionBase(data);
+  const balances = { ...base.liabilityBalances };
+  if (compareYm(ym, base.startMonth) > 0) {
+    for (const month of ymRange(base.startMonth, addMonths(ym, -1))) {
       for (const liability of data.liabilities) {
         const balance = balances[liability.id] ?? 0;
         if (!liability.is_active || balance <= 0) continue;
@@ -233,16 +277,15 @@ export function simulationInputFor(
   scenario: Scenario,
   overrides: Partial<SimulationInput> = {},
 ): SimulationInput {
-  const position = currentPosition(data);
+  const base = projectionBase(data);
   return {
-    // 마지막 기록 다음 달부터
-    startMonth: addMonths(position.asOf ?? "2026-01", 1),
+    startMonth: base.startMonth,
     members: data.members,
     assets: data.assets,
     liabilities: data.liabilities,
     planItems: data.planItems,
-    assetValues: position.assetValues,
-    liabilityBalances: position.liabilityBalances,
+    assetValues: base.assetValues,
+    liabilityBalances: base.liabilityBalances,
     assumptions: resolveAssumptions(scenario.assumptions),
     events: eventsForScenario(scenario, data.events),
     ...overrides,

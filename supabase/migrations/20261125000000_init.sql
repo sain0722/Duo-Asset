@@ -114,7 +114,8 @@ create table public.liabilities (
   )),
   -- null = 공용통장에서 납부
   payer_member_id uuid,
-  original_principal bigint not null check (original_principal >= 0),
+  -- 원금이 없는 정기 지급은 부채가 아니라 고정지출(plan_items)로 등록한다
+  original_principal bigint not null check (original_principal > 0),
   annual_rate numeric(6, 3) not null default 0 check (annual_rate >= 0 and annual_rate < 100),
   term_months int check (term_months > 0),
   start_month public.ym,           -- 첫 납부 월
@@ -257,7 +258,8 @@ create table public.month_entries (
   foreign key (household_id, month_id) references public.months (household_id, id) on delete cascade,
   foreign key (household_id, member_id) references public.members (household_id, id),
   foreign key (household_id, to_member_id) references public.members (household_id, id),
-  foreign key (household_id, plan_item_id) references public.plan_items (household_id, id) on delete set null (plan_item_id),
+  -- 실제 값이 연결된 계획 항목은 삭제할 수 없다 (종료·비활성화만). 다시 연 달의 계획 줄과 짝이 끊기지 않게 한다.
+  foreign key (household_id, plan_item_id) references public.plan_items (household_id, id),
   check (kind <> 'contribution' or member_id is not null),
   check (kind = 'transfer' or to_member_id is null),
   check (kind <> 'transfer' or member_id is distinct from to_member_id)

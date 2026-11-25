@@ -353,6 +353,41 @@ describe("월 정산: 부채", () => {
     expectIdentities(report);
   });
 
+  it("대환·입주처럼 한 대출을 갚고 다른 대출을 받는 달에도 저축액이 튀지 않는다", () => {
+    const m = member("하늘");
+    const account = asset({ kind: "cash", owner_member_id: m.id });
+    const presale = asset({ kind: "presale", liquidity: "locked" });
+    const home = asset({ kind: "real_estate", liquidity: "locked" });
+    const bridge = liability({ kind: "bullet", name: "중도금 대출", original_principal: 180_000_000, annual_rate: 4, term_months: 24, start_month: "2024-06" });
+    const mortgage = liability({ kind: "amortized", name: "주택담보대출", original_principal: 250_000_000, annual_rate: 4, term_months: 360, start_month: "2026-04" });
+    const salary = planItem({ kind: "income", amount: 7_000_000, member_id: m.id });
+    // 입주: 중도금 대출 1.8억 상환, 주담대 2.5억 실행, 잔금 1억 납부. 평소처럼 400만 원 쓰고 300만 원 남겼다.
+    const report = computeMonthReport(
+      monthInput({
+        members: [m],
+        assets: [account, presale, home],
+        liabilities: [bridge, mortgage],
+        planItems: [salary],
+        prevAssets: [assetSnap(account, 40_000_000), assetSnap(presale, 300_000_000)],
+        prevLiabilities: [liabilitySnap(bridge, 180_000_000)],
+        // 현금: +700 수입 −400 소비 +2.5억 대출 −1.8억 상환 −1억 잔금 = 4,000 + 300 − 3,000
+        curAssets: [assetSnap(account, 13_000_000), assetSnap(presale, 0), assetSnap(home, 400_000_000)],
+        curLiabilities: [liabilitySnap(bridge, 0), liabilitySnap(mortgage, 250_000_000)],
+        entries: [actual(salary, 7_000_000)],
+      }),
+    );
+    expect(report.consumption).toBe(4_000_000);
+    expect(report.savings).toBe(3_000_000);
+    // 부채는 순액으로: 2.5억 − 1.8억 = 7,000만 원 순차입
+    expect(report.principalRepaid).toBe(0);
+    expect(report.newBorrowing).toBe(70_000_000);
+    expect(report.netWorthChange).toBe(3_000_000);
+    // 부채별 줄에는 각각의 변화가 그대로 보인다
+    expect(report.liabilityLines.find((l) => l.liabilityId === bridge.id)!.principalPaid).toBe(180_000_000);
+    expect(report.liabilityLines.find((l) => l.liabilityId === mortgage.id)!.principalPaid).toBe(-250_000_000);
+    expectIdentities(report);
+  });
+
   it("빌린 돈을 써 버리면 소비가 늘고 저축은 음수가 된다", () => {
     const m = member("하늘");
     const account = asset({ kind: "cash", owner_member_id: m.id });
@@ -512,23 +547,82 @@ describe("월 정산: 미확인·기준 월·기초 조정·보관", () => {
     expectIdentities(report);
   });
 
-  it("보관한 자산은 남은 금액을 전액 인출한 것으로 처리한다", () => {
+  it("보관해도 금액이 남아 있으면 계속 집계하고, 0을 기록해야 정리된다", () => {
     const m = member("하늘");
     const account = asset({ kind: "cash", owner_member_id: m.id });
     const closed = asset({ kind: "savings", owner_member_id: m.id, is_active: false });
-    const report = computeMonthReport(
+    const base = {
+      members: [m],
+      assets: [account, closed],
+      prevAssets: [assetSnap(account, 1_000_000), assetSnap(closed, 5_000_000)],
+    };
+
+    // 보관만 하고 잔액을 정리하지 않았다: 자산은 그대로 남고 미확인으로 표시된다 (가짜 소비가 생기지 않는다)
+    const pending = computeMonthReport(monthInput({ ...base, curAssets: [assetSnap(account, 1_000_000)] }));
+    expect(pending.complete).toBe(false);
+    expect(pending.closing.assets).toBe(6_000_000);
+    expect(pending.consumption).toBe(0);
+    expectIdentities(pending);
+
+    // 해지해서 통장으로 받았다고 기록하면 정리된다
+    const settled = computeMonthReport(
+      monthInput({ ...base, curAssets: [assetSnap(account, 6_000_000), assetSnap(closed, 0)] }),
+    );
+    expect(settled.complete).toBe(true);
+    expect(settled.closing.assets).toBe(6_000_000);
+    expect(settled.consumption).toBe(0);
+    expect(settled.savings).toBe(0);
+    expectIdentities(settled);
+
+    // 다음 달부터는 줄 자체가 사라진다
+    const next = computeMonthReport(
       monthInput({
-        members: [m],
-        assets: [account, closed],
-        prevAssets: [assetSnap(account, 1_000_000), assetSnap(closed, 5_000_000)],
+        ...base,
+        prevAssets: [assetSnap(account, 6_000_000), assetSnap(closed, 0)],
         curAssets: [assetSnap(account, 6_000_000)],
       }),
     );
-    expect(report.complete).toBe(true);
-    expect(report.closing.assets).toBe(6_000_000);
+    expect(next.assetLines.map((line) => line.assetId)).toEqual([account.id]);
+    expect(next.complete).toBe(true);
+  });
+
+  it("장부가와 다른 값에 판 자산의 차액은 소비가 아니라 평가 변동이다", () => {
+    const m = member("하늘");
+    const account = asset({ kind: "cash", owner_member_id: m.id });
+    const car = asset({ kind: "vehicle", owner_member_id: m.id, liquidity: "locked" });
+    // 장부 3,000만 원인 차를 1,500만 원에 팔았다: 순투입액을 받은 금액만큼 줄인다
+    const report = computeMonthReport(
+      monthInput({
+        members: [m],
+        assets: [account, car],
+        prevAssets: [assetSnap(account, 1_000_000), assetSnap(car, 30_000_000, 40_000_000)],
+        curAssets: [assetSnap(account, 16_000_000), assetSnap(car, 0, 25_000_000)],
+      }),
+    );
     expect(report.consumption).toBe(0);
     expect(report.savings).toBe(0);
+    expect(report.otherValuation).toBe(-15_000_000);
     expectIdentities(report);
+  });
+
+  it("보관한 부채도 원금이 남아 있으면 계속 집계한다", () => {
+    const m = member("하늘");
+    const account = asset({ kind: "cash", owner_member_id: m.id });
+    const loan = liability({ kind: "interest_only", original_principal: 50_000_000, monthly_payment: 0, is_active: false });
+    const report = computeMonthReport(
+      monthInput({
+        members: [m],
+        assets: [account],
+        liabilities: [loan],
+        prevAssets: [assetSnap(account, 1_000_000)],
+        prevLiabilities: [liabilitySnap(loan, 50_000_000)],
+        curAssets: [assetSnap(account, 1_000_000)],
+      }),
+    );
+    expect(report.complete).toBe(false);
+    expect(report.closing.liabilities).toBe(50_000_000);
+    expect(report.principalRepaid).toBe(0);
+    expect(report.consumption).toBe(0);
   });
 
   it("소비지출이 음수면 수입 누락을 경고한다", () => {
@@ -545,6 +639,19 @@ describe("월 정산: 미확인·기준 월·기초 조정·보관", () => {
     expect(report.consumption).toBe(-500_000);
     expect(report.warnings.some((w) => w.code === "negative_consumption")).toBe(true);
     expectIdentities(report);
+  });
+
+  it("확인한 지출이 주머니에서 나간 돈보다 많으면 경고한다", () => {
+    const h = household();
+    const input = typicalMonth(h);
+    // 공동 주머니에서 실제로 나간 돈은 190만 원인데 250만 원어치 지출을 확인했다
+    input.entries.push(entry({ kind: "expense", amount: 2_500_000, member_id: null, name: "생활비" }));
+    const report = computeMonthReport(input);
+    const joint = report.pockets.find((p) => p.pocket === JOINT)!;
+    expect(joint.unclassified).toBe(-600_000);
+    expect(report.warnings.some((w) => w.code === "negative_unclassified" && w.pocket === JOINT)).toBe(true);
+    // 가구 합계는 영향받지 않는다
+    expect(report.consumption).toBe(3_900_000);
   });
 
   it("계획에 없던 수입·지출을 추가할 수 있다", () => {

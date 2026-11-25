@@ -435,7 +435,8 @@ export type ReportWarningCode =
   | "unconfirmed_income"
   | "unconfirmed_contribution"
   | "negative_consumption"
-  | "negative_pocket_consumption";
+  | "negative_pocket_consumption"
+  | "negative_unclassified";
 
 export interface ReportWarning {
   code: ReportWarningCode;
@@ -474,7 +475,9 @@ export interface MonthReport {
   savings: Won;
   /** 저축률 % (소수 1자리). 수입이 0 이면 null */
   savingsRate: number | null;
+  /** 원금 상환액 (가구 순액): 부채 잔액 합이 줄어든 만큼. 늘었으면 0 */
   principalRepaid: Won;
+  /** 신규 차입 (가구 순액): 부채 잔액 합이 늘어난 만큼. 줄었으면 0 */
   newBorrowing: Won;
   /** 투자 평가손익 (investment, pension) */
   investmentGain: Won;
