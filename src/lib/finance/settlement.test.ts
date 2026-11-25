@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeMonthReport } from "./settlement";
+import { computeMonthReport, percentOf } from "./settlement";
 import {
   actual,
   asset,
@@ -732,5 +732,655 @@ describe("월 정산: 항등식 (무작위 입력)", () => {
       );
       expectIdentities(report);
     }
+  });
+});
+
+// ───────────────────────── 추가 고정: 기준 월 · 공동 주머니 · 미확인 · 기초 조정 ─────────────────────────
+
+describe("월 정산: 기준 월 (8절 6항)", () => {
+  function fixture() {
+    const m = member("하늘");
+    const account = asset({ kind: "cash", owner_member_id: m.id, name: "통장" });
+    const stock = asset({ kind: "investment", owner_member_id: m.id, name: "증권 계좌" });
+    const loan = liability({
+      kind: "interest_only",
+      name: "차용금",
+      original_principal: 30_000_000,
+      monthly_payment: 400_000,
+      payer_member_id: m.id,
+    });
+    const salary = planItem({ kind: "income", amount: 4_000_000, member_id: m.id, name: "급여" });
+    const contribution = planItem({ kind: "contribution", amount: 1_000_000, member_id: m.id });
+    const base = { isBaseline: true, members: [m], assets: [account, stock], liabilities: [loan], planItems: [salary, contribution] };
+    return { m, account, stock, loan, salary, contribution, base };
+  }
+
+  it("기준 월은 opening_* 를 무시한다: 기초 조정이 없고 월초 합계가 월말 합계와 같다", () => {
+    const f = fixture();
+    const report = computeMonthReport(
+      monthInput({
+        ...f.base,
+        curAssets: [
+          assetSnap(f.account, 5_000_000, 5_000_000, { opening_value: 3_000_000, opening_principal: 3_000_000 }),
+          assetSnap(f.stock, 12_000_000, 10_000_000, { opening_value: 9_000_000, opening_principal: 8_000_000 }),
+        ],
+        curLiabilities: [liabilitySnap(f.loan, 30_000_000, { opening_balance: 30_000_000 })],
+      }),
+    );
+    expect(report.adjustment).toBe(0);
+    for (const line of report.assetLines) {
+      expect(line.adjustment).toBe(0);
+      expect(line.openValue).toBe(line.value);
+      expect(line.openPrincipal).toBe(line.principal);
+      expect(line.contributed).toBe(0);
+      expect(line.gain).toBe(0);
+    }
+    expect(report.liabilityLines[0]).toMatchObject({ openBalance: 30_000_000, balance: 30_000_000, principalPaid: 0, adjustment: 0 });
+    expect(report.closing).toMatchObject({ assets: 17_000_000, liabilities: 30_000_000, netWorth: -13_000_000 });
+    expect(report.opening).toEqual(report.closing);
+    expect(report.netWorthChange).toBe(0);
+    // 평가금액과 순투입액이 달라도 기준 월에는 평가손익을 만들지 않는다
+    expect(report.investmentGain).toBe(0);
+    expectIdentities(report);
+  });
+
+  it("기준 월에도 스냅샷이 없는 자산·부채가 있으면 미완료(complete = false)다", () => {
+    const f = fixture();
+    const noStock = computeMonthReport(
+      monthInput({
+        ...f.base,
+        curAssets: [assetSnap(f.account, 5_000_000)],
+        curLiabilities: [liabilitySnap(f.loan, 30_000_000)],
+      }),
+    );
+    expect(noStock.complete).toBe(false);
+    expect(noStock.warnings.map((w) => w.code)).toEqual(["unconfirmed_asset"]);
+    expect(noStock.assetLines.find((l) => l.assetId === f.stock.id)).toMatchObject({ confirmed: false, value: 0 });
+
+    const noLoan = computeMonthReport(
+      monthInput({
+        ...f.base,
+        curAssets: [assetSnap(f.account, 5_000_000), assetSnap(f.stock, 12_000_000, 10_000_000)],
+      }),
+    );
+    expect(noLoan.complete).toBe(false);
+    expect(noLoan.warnings.map((w) => w.code)).toEqual(["unconfirmed_liability"]);
+  });
+
+  it("기준 월은 잔액만 모두 확인하면 완료다: 계획된 수입·납입의 실제 값은 요구하지 않는다", () => {
+    const f = fixture();
+    const report = computeMonthReport(
+      monthInput({
+        ...f.base,
+        curAssets: [assetSnap(f.account, 5_000_000), assetSnap(f.stock, 12_000_000, 10_000_000)],
+        curLiabilities: [liabilitySnap(f.loan, 30_000_000)],
+      }),
+    );
+    expect(report.complete).toBe(true);
+    expect(report.warnings).toEqual([]);
+  });
+
+  it("기준 월의 실제 이자는 스냅샷에 적혀 있어도 집계하지 않는다 (null)", () => {
+    const f = fixture();
+    const report = computeMonthReport(
+      monthInput({
+        ...f.base,
+        curAssets: [assetSnap(f.account, 5_000_000), assetSnap(f.stock, 12_000_000, 10_000_000)],
+        curLiabilities: [liabilitySnap(f.loan, 30_000_000, { interest_paid: 400_000 })],
+      }),
+    );
+    expect(report.liabilityLines[0].interestPaid).toBeNull();
+  });
+
+  it("기준 월은 실제 수입·납입·이동·지출을 입력해도 흐름 지표와 주머니가 비어 있다", () => {
+    const f = fixture();
+    const report = computeMonthReport(
+      monthInput({
+        ...f.base,
+        curAssets: [assetSnap(f.account, 5_000_000), assetSnap(f.stock, 12_000_000, 10_000_000)],
+        curLiabilities: [liabilitySnap(f.loan, 30_000_000, { interest_paid: 400_000 })],
+        entries: [
+          actual(f.salary, 4_000_000),
+          actual(f.contribution, 1_000_000),
+          entry({ kind: "transfer", amount: 200_000, member_id: f.m.id, to_member_id: null }),
+          entry({ kind: "expense", amount: 300_000, member_id: f.m.id, name: "병원비" }),
+        ],
+      }),
+    );
+    expect(report).toMatchObject({
+      isBaseline: true,
+      income: 0,
+      consumption: 0,
+      savings: 0,
+      savingsRate: null,
+      principalRepaid: 0,
+      newBorrowing: 0,
+      investmentGain: 0,
+      otherValuation: 0,
+      adjustment: 0,
+      netWorthChange: 0,
+    });
+    expect(report.incomeLines).toEqual([]);
+    expect(report.contributionLines).toEqual([]);
+    expect(report.transferLines).toEqual([]);
+    expect(report.pockets).toEqual([]);
+    // 잔액 지표는 집계한다
+    expect(report.closing).toMatchObject({ assets: 17_000_000, liquid: 5_000_000, financial: 17_000_000 });
+    expect(report.closing.byKind).toEqual({ cash: 5_000_000, investment: 12_000_000 });
+  });
+});
+
+describe("월 정산: 공동 수입과 공용통장에서 내는 대출 (2절·5절)", () => {
+  /**
+   * 주택담보대출(원금균등 2.4억, 연 4.8%, 240개월, 2026-01 시작)을 공용통장에서 낸다.
+   * 2026-03 월초 잔액 2억 3,800만 → 예정 원금 100만, 예정 이자 238,000,000 × 4.8% ÷ 12 = 952,000
+   */
+  function fixture() {
+    const haneul = member("하늘");
+    const bada = member("바다");
+    const hAccount = asset({ kind: "cash", owner_member_id: haneul.id, name: "하늘 통장" });
+    const bAccount = asset({ kind: "cash", owner_member_id: bada.id, name: "바다 통장" });
+    const jointAccount = asset({ kind: "cash", name: "공용통장" });
+    const home = asset({ kind: "real_estate", name: "아파트", liquidity: "locked" });
+    const mortgage = liability({
+      kind: "equal_principal",
+      name: "주택담보대출",
+      original_principal: 240_000_000,
+      annual_rate: 4.8,
+      term_months: 240,
+      start_month: "2026-01",
+    });
+    const hSalary = planItem({ kind: "income", amount: 4_200_000, member_id: haneul.id, name: "하늘 급여" });
+    const bSalary = planItem({ kind: "income", amount: 3_000_000, member_id: bada.id, name: "바다 급여" });
+    const hContribution = planItem({ kind: "contribution", amount: 2_000_000, member_id: haneul.id });
+    const bContribution = planItem({ kind: "contribution", amount: 1_500_000, member_id: bada.id });
+    const rent = planItem({ kind: "income", amount: 300_000, income_type: "other", name: "공동 임대수입" });
+    const living = planItem({ kind: "expense", amount: 1_800_000, name: "공동생활비" });
+
+    const input = (interestPaid: number | null, rentEntry: boolean) =>
+      monthInput({
+        month: "2026-03",
+        members: [haneul, bada],
+        assets: [hAccount, bAccount, jointAccount, home],
+        liabilities: [mortgage],
+        planItems: [hSalary, bSalary, hContribution, bContribution, rent, living],
+        prevAssets: [
+          assetSnap(hAccount, 1_000_000),
+          assetSnap(bAccount, 800_000),
+          assetSnap(jointAccount, 5_000_000),
+          assetSnap(home, 400_000_000, 380_000_000),
+        ],
+        prevLiabilities: [liabilitySnap(mortgage, 238_000_000)],
+        curAssets: [
+          // 하늘: +급여 420 −공용 200 −개인 지출 190 = +30
+          assetSnap(hAccount, 1_300_000),
+          // 바다: +급여 300 −공용 150 −개인 지출 120 = +30
+          assetSnap(bAccount, 1_100_000),
+          // 공용: +납입 350 +임대수입 30 −원금 100 −이자 95.2 −생활비 170 = +14.8
+          assetSnap(jointAccount, 5_148_000),
+          assetSnap(home, 400_000_000, 380_000_000),
+        ],
+        curLiabilities: [liabilitySnap(mortgage, 237_000_000, { interest_paid: interestPaid })],
+        entries: [
+          actual(hSalary, 4_200_000),
+          actual(bSalary, 3_000_000),
+          actual(hContribution, 2_000_000),
+          actual(bContribution, 1_500_000),
+          ...(rentEntry ? [actual(rent, 300_000)] : []),
+        ],
+      });
+    return { haneul, bada, mortgage, rent, input };
+  }
+  const pocketOf = (report: MonthReport, id: string) => report.pockets.find((p) => p.pocket === id)!;
+
+  it("공동 명의 수입은 공동 주머니의 수입이고 가구 수입에 한 번만 더해진다", () => {
+    const f = fixture();
+    const report = computeMonthReport(f.input(952_000, true));
+    expect(report.complete).toBe(true);
+    expect(report.incomeLines.find((l) => l.key === f.rent.id)).toMatchObject({ pocket: JOINT, planned: 300_000, actual: 300_000 });
+    expect(pocketOf(report, JOINT).income).toBe(300_000);
+    expect(pocketOf(report, f.haneul.id).income).toBe(4_200_000);
+    expect(pocketOf(report, f.bada.id).income).toBe(3_000_000);
+    expect(report.income).toBe(7_500_000);
+    expect(report.plan.income).toBe(7_500_000);
+  });
+
+  it("공용통장에서 낸 원금은 공동 주머니의 원금 상환이고, 이자와 생활비만 공동 소비다", () => {
+    const f = fixture();
+    const report = computeMonthReport(f.input(952_000, true));
+    const joint = pocketOf(report, JOINT);
+    expect(joint).toMatchObject({
+      transfersIn: 3_500_000,
+      transfersOut: 0,
+      assetContribution: 148_000,
+      principalPaid: 1_000_000,
+      // 수입 30 + 납입 350 − 순투입 14.8 − 원금 100 = 265.2 (= 이자 95.2 + 생활비 170)
+      consumption: 2_652_000,
+      classified: 952_000,
+      unclassified: 1_700_000,
+      // 계획 소비 = 공동지출 180 + 예정 이자 95.2
+      plannedConsumption: 2_752_000,
+    });
+    // 개인 주머니에는 대출 원금·이자가 섞이지 않는다
+    expect(pocketOf(report, f.haneul.id)).toMatchObject({ principalPaid: 0, consumption: 1_900_000, classified: 0 });
+    expect(pocketOf(report, f.bada.id)).toMatchObject({ principalPaid: 0, consumption: 1_200_000, classified: 0 });
+  });
+
+  it("가구 합계: 소비 = 세 주머니의 합, 저축 = 수입 − 소비 − 원금 상환", () => {
+    const f = fixture();
+    const report = computeMonthReport(f.input(952_000, true));
+    expect(report.consumption).toBe(5_752_000);
+    expect(report.principalRepaid).toBe(1_000_000);
+    expect(report.newBorrowing).toBe(0);
+    // 750 − 575.2 − 100 = 74.8 = 세 통장 순투입 합 (30 + 30 + 14.8)
+    expect(report.savings).toBe(748_000);
+    // 748 ÷ 7,500 = 9.97…% → 10.0
+    expect(report.savingsRate).toBe(10);
+    // 순자산은 저축 74.8 + 원금 상환 100 만큼 늘어난다 (이자는 순자산을 줄였다)
+    expect(report.netWorthChange).toBe(1_748_000);
+    // 계획: 소비 = 사용 가능 금액 220 + 150 + 공동지출 180 + 이자 95.2, 저축 = 750 − 645.2 − 100
+    expect(report.plan).toMatchObject({ consumption: 6_452_000, principalRepayment: 1_000_000, savings: 48_000 });
+    expectIdentities(report);
+  });
+
+  it("공동 대출의 이자가 미확인이면 계획 이자를 지출로 확정하지 않고 미분류로 남긴다", () => {
+    const f = fixture();
+    const report = computeMonthReport(f.input(null, true));
+    const joint = pocketOf(report, JOINT);
+    expect(joint.consumption).toBe(2_652_000);
+    expect(joint.classified).toBe(0);
+    expect(joint.unclassified).toBe(2_652_000);
+    expect(joint.expenseLines.find((l) => l.key === `liability:${f.mortgage.id}:interest`)).toMatchObject({
+      planned: 952_000,
+      actual: null,
+      pocket: JOINT,
+    });
+    expect(report.liabilityLines[0]).toMatchObject({ plannedPrincipal: 1_000_000, plannedInterest: 952_000, interestPaid: null });
+    // 가구 합계는 잔액에서 나오므로 이자 확인 여부와 무관하다
+    expect(report.consumption).toBe(5_752_000);
+    expectIdentities(report);
+  });
+
+  it("공동 수입이 미확인이면 계획 금액을 잠정값으로 쓰고 공동 주머니에 경고를 남긴다", () => {
+    const f = fixture();
+    const report = computeMonthReport(f.input(952_000, false));
+    expect(report.complete).toBe(false);
+    expect(report.warnings).toContainEqual(expect.objectContaining({ code: "unconfirmed_income", pocket: JOINT }));
+    expect(report.incomeLines.find((l) => l.key === f.rent.id)!.actual).toBeNull();
+    expect(pocketOf(report, JOINT).income).toBe(300_000);
+    expect(report.income).toBe(7_500_000);
+    expectIdentities(report);
+  });
+});
+
+describe("월 정산: 미확인 처리 (1절 5항·5절·8절)", () => {
+  it("공용통장 납입이 미확인이면 계획 금액을 잠정값으로 쓰고, 경고와 함께 미완료가 된다", () => {
+    const h = household();
+    const input = typicalMonth(h);
+    input.entries = input.entries.filter((e) => e.plan_item_id !== h.hContribution.id);
+    const report = computeMonthReport(input);
+
+    expect(report.complete).toBe(false);
+    expect(report.warnings).toEqual([
+      { code: "unconfirmed_contribution", message: "하늘 공용통장 입금액 미확인", pocket: h.haneul.id },
+    ]);
+    expect(report.contributionLines.find((l) => l.key === h.hContribution.id)).toMatchObject({
+      planned: 2_000_000,
+      actual: null,
+      pocket: h.haneul.id,
+    });
+    // 잠정값 = 계획 200만
+    expect(report.pockets.find((p) => p.pocket === h.haneul.id)!.transfersOut).toBe(2_000_000);
+    expect(report.pockets.find((p) => p.pocket === JOINT)!.transfersIn).toBe(3_500_000);
+    expect(report.pockets.find((p) => p.pocket === h.haneul.id)!.consumption).toBe(1_300_000);
+    expectIdentities(report);
+  });
+
+  it("공용통장 납입 0원을 확인한 것은 미확인과 다르다: 완료이고 실제 0원으로 계산한다", () => {
+    const h = household();
+    const input = typicalMonth(h);
+    input.entries = input.entries.map((e) => (e.plan_item_id === h.hContribution.id ? { ...e, amount: 0 } : e));
+    const report = computeMonthReport(input);
+
+    expect(report.complete).toBe(true);
+    expect(report.contributionLines.find((l) => l.key === h.hContribution.id)!.actual).toBe(0);
+    expect(report.pockets.find((p) => p.pocket === h.haneul.id)!.transfersOut).toBe(0);
+    expect(report.pockets.find((p) => p.pocket === JOINT)!.transfersIn).toBe(1_500_000);
+    // 하늘 통장에서 실제로 빠진 200만 원은 이동으로 설명되지 않으므로 하늘의 소비로 보인다: 130 + 200
+    expect(report.pockets.find((p) => p.pocket === h.haneul.id)!.consumption).toBe(3_300_000);
+    // 공용통장은 들어온 돈(150)보다 잔액이 더 늘었다(160) → 음수 소비
+    expect(report.pockets.find((p) => p.pocket === JOINT)!.consumption).toBe(-100_000);
+    // 가구 소비는 그대로다
+    expect(report.consumption).toBe(3_900_000);
+    expectIdentities(report);
+  });
+
+  /** 하늘·바다·공용통장만 있는 단순한 가구. 계획은 모두 하늘 것이다. */
+  function simple() {
+    const a = member("하늘");
+    const b = member("바다");
+    const aAccount = asset({ kind: "cash", owner_member_id: a.id, name: "하늘 통장" });
+    const bAccount = asset({ kind: "cash", owner_member_id: b.id, name: "바다 통장" });
+    const jointAccount = asset({ kind: "cash", name: "공용통장" });
+    const salary = planItem({ kind: "income", amount: 4_000_000, member_id: a.id, name: "하늘 급여" });
+    const contribution = planItem({ kind: "contribution", amount: 1_000_000, member_id: a.id });
+    const phone = planItem({ kind: "expense", amount: 100_000, member_id: a.id, name: "통신비" });
+    return {
+      a,
+      b,
+      aAccount,
+      bAccount,
+      jointAccount,
+      salary,
+      contribution,
+      phone,
+      members: [a, b],
+      assets: [aAccount, bAccount, jointAccount],
+      prevAssets: [assetSnap(aAccount, 1_000_000), assetSnap(bAccount, 1_000_000), assetSnap(jointAccount, 1_000_000)],
+    };
+  }
+
+  it("실제 항목에서 주머니를 바꾸면 계획의 주머니가 아니라 그쪽 주머니로 집계한다", () => {
+    const s = simple();
+    // 하늘 급여가 바다 통장으로 들어왔고, 공용통장 납입도 바다가 했고, 통신비는 공용통장에서 나갔다
+    const report = computeMonthReport(
+      monthInput({
+        members: s.members,
+        assets: s.assets,
+        planItems: [s.salary, s.contribution, s.phone],
+        prevAssets: s.prevAssets,
+        curAssets: [
+          assetSnap(s.aAccount, 1_000_000),
+          // 바다: +급여 400 −공용 100 −개인 지출 50 = +250
+          assetSnap(s.bAccount, 3_500_000),
+          // 공용: +100 −통신비 10 −기타 30 = +60
+          assetSnap(s.jointAccount, 1_600_000),
+        ],
+        entries: [
+          { ...actual(s.salary, 4_000_000), member_id: s.b.id },
+          { ...actual(s.contribution, 1_000_000), member_id: s.b.id },
+          { ...actual(s.phone, 100_000), member_id: null },
+        ],
+      }),
+    );
+    const pocket = (id: string) => report.pockets.find((p) => p.pocket === id)!;
+
+    expect(report.complete).toBe(true);
+    expect(report.incomeLines).toEqual([expect.objectContaining({ key: s.salary.id, pocket: s.b.id, planned: 4_000_000, actual: 4_000_000 })]);
+    expect(report.contributionLines).toEqual([expect.objectContaining({ key: s.contribution.id, pocket: s.b.id, actual: 1_000_000 })]);
+
+    expect(pocket(s.a.id)).toMatchObject({ income: 0, transfersOut: 0, consumption: 0, classified: 0 });
+    expect(pocket(s.b.id)).toMatchObject({ income: 4_000_000, transfersOut: 1_000_000, assetContribution: 2_500_000, consumption: 500_000 });
+    expect(pocket(JOINT)).toMatchObject({ transfersIn: 1_000_000, consumption: 400_000, classified: 100_000, unclassified: 300_000 });
+    expect(pocket(JOINT).expenseLines.map((l) => l.key)).toEqual([s.phone.id]);
+    expect(pocket(s.a.id).expenseLines).toEqual([]);
+
+    expect(report.income).toBe(4_000_000);
+    expect(report.consumption).toBe(900_000);
+    expect(report.savings).toBe(3_100_000);
+    expect(report.warnings).toEqual([]);
+    expectIdentities(report);
+  });
+
+  it("주머니 소비가 음수면 그 주머니에 경고한다 (가구 소비가 양수여도)", () => {
+    const s = simple();
+    const bSalary = planItem({ kind: "income", amount: 3_000_000, member_id: s.b.id, name: "바다 급여" });
+    // 바다가 하늘에게 50만 원을 보냈는데 이동을 기록하지 않았다
+    const input = monthInput({
+      members: s.members,
+      assets: s.assets,
+      planItems: [bSalary],
+      prevAssets: s.prevAssets,
+      curAssets: [
+        assetSnap(s.aAccount, 1_500_000),
+        // 바다: +급여 300 −하늘에게 50 −개인 지출 150 = +100
+        assetSnap(s.bAccount, 2_000_000),
+        assetSnap(s.jointAccount, 1_000_000),
+      ],
+      entries: [actual(bSalary, 3_000_000)],
+    });
+    const missing = computeMonthReport(input);
+    expect(missing.pockets.find((p) => p.pocket === s.a.id)!.consumption).toBe(-500_000);
+    expect(missing.pockets.find((p) => p.pocket === s.b.id)!.consumption).toBe(2_000_000);
+    expect(missing.consumption).toBe(1_500_000);
+    // 하늘 주머니에만 경고가 붙고, 가구 소비 음수 경고나 미분류 음수 경고는 없다
+    expect(missing.warnings.map((w) => [w.code, w.pocket])).toEqual([["negative_pocket_consumption", s.a.id]]);
+    // 경고는 마감을 막지 않는다 (미확인이 아니다)
+    expect(missing.complete).toBe(true);
+
+    // 이동을 기록하면 경고가 사라진다
+    input.entries.push(entry({ kind: "transfer", amount: 500_000, member_id: s.b.id, to_member_id: s.a.id }));
+    const recorded = computeMonthReport(input);
+    expect(recorded.warnings).toEqual([]);
+    expect(recorded.pockets.find((p) => p.pocket === s.a.id)!.consumption).toBe(0);
+    expect(recorded.pockets.find((p) => p.pocket === s.b.id)!.consumption).toBe(1_500_000);
+    expect(recorded.transferLines).toEqual([expect.objectContaining({ from: s.b.id, to: s.a.id, amount: 500_000 })]);
+    expectIdentities(recorded);
+  });
+
+  it("초과 배분한 구성원의 주머니 계획 소비는 음수가 아니라 0이다", () => {
+    const s = simple();
+    // 수입 400 − 납입 100 − 통신비 10 − 저축 350 = −60
+    const saving = planItem({ kind: "saving", amount: 3_500_000, member_id: s.a.id });
+    const report = computeMonthReport(
+      monthInput({
+        members: s.members,
+        assets: s.assets,
+        planItems: [s.salary, s.contribution, s.phone, saving],
+        prevAssets: s.prevAssets,
+        curAssets: s.prevAssets,
+        entries: [actual(s.salary, 0), actual(s.contribution, 0)],
+      }),
+    );
+    // 고정지출 10 + 사용 가능 금액(음수는 0)
+    expect(report.pockets.find((p) => p.pocket === s.a.id)!.plannedConsumption).toBe(100_000);
+    expect(report.plan.consumption).toBe(100_000);
+    expect(report.plan.savings).toBe(3_900_000);
+  });
+});
+
+describe("월 정산: 이자의 미확인과 0원 (1절 5항·5절)", () => {
+  const m = member("하늘");
+  const account = asset({ kind: "cash", owner_member_id: m.id });
+  const salary = planItem({ kind: "income", amount: 3_000_000, member_id: m.id });
+  const run = (loan: ReturnType<typeof liability>, interestPaid: number | null, curCash: number) =>
+    computeMonthReport(
+      monthInput({
+        members: [m],
+        assets: [account],
+        liabilities: [loan],
+        planItems: [salary],
+        prevAssets: [assetSnap(account, 1_000_000)],
+        prevLiabilities: [liabilitySnap(loan, 20_000_000)],
+        curAssets: [assetSnap(account, curCash)],
+        curLiabilities: [liabilitySnap(loan, 20_000_000, { interest_paid: interestPaid })],
+        entries: [actual(salary, 3_000_000)],
+      }),
+    );
+
+  it("계획 이자가 없는 부채: 실제 이자 0원을 확인하면 지출 줄(0원)이 생기고, 미확인이면 줄이 없다", () => {
+    const free = liability({ kind: "interest_only", name: "무이자 차용금", original_principal: 20_000_000, monthly_payment: 0, payer_member_id: m.id });
+
+    const confirmedZero = run(free, 0, 3_000_000);
+    expect(confirmedZero.liabilityLines[0]).toMatchObject({ plannedInterest: 0, interestPaid: 0 });
+    expect(confirmedZero.pockets[0].expenseLines).toEqual([
+      { key: `liability:${free.id}:interest`, name: "무이자 차용금 이자", pocket: m.id, planned: null, actual: 0 },
+    ]);
+    expect(confirmedZero.pockets[0].classified).toBe(0);
+
+    const unconfirmed = run(free, null, 3_000_000);
+    expect(unconfirmed.liabilityLines[0].interestPaid).toBeNull();
+    expect(unconfirmed.pockets[0].expenseLines).toEqual([]);
+    expect(unconfirmed.pockets[0].classified).toBe(0);
+    // 이자 확인 여부는 마감 조건이 아니다
+    expect(unconfirmed.complete).toBe(true);
+  });
+
+  it("계획 이자가 있는데 미확인이면 지출 줄은 보이지만 확인된 지출에 넣지 않는다", () => {
+    const loan = liability({ kind: "interest_only", name: "차용금", original_principal: 20_000_000, monthly_payment: 250_000, payer_member_id: m.id });
+    // 급여 300 − 실제로 나간 돈 100 = 통장 +200
+    const report = run(loan, null, 3_000_000);
+    expect(report.pockets[0].expenseLines).toEqual([
+      { key: `liability:${loan.id}:interest`, name: "차용금 이자", pocket: m.id, planned: 250_000, actual: null },
+    ]);
+    expect(report.pockets[0].consumption).toBe(1_000_000);
+    expect(report.pockets[0].classified).toBe(0);
+    expect(report.pockets[0].unclassified).toBe(1_000_000);
+    expect(report.complete).toBe(true);
+  });
+
+  it("실제 이자를 확인하면 계획 금액이 아니라 실제 금액만큼 확인된 지출이 된다", () => {
+    const loan = liability({ kind: "interest_only", name: "차용금", original_principal: 20_000_000, monthly_payment: 250_000, payer_member_id: m.id });
+    const paidLess = run(loan, 200_000, 3_000_000);
+    expect(paidLess.pockets[0].classified).toBe(200_000);
+    expect(paidLess.pockets[0].unclassified).toBe(800_000);
+
+    const paidNothing = run(loan, 0, 3_000_000);
+    expect(paidNothing.pockets[0].expenseLines[0]).toMatchObject({ planned: 250_000, actual: 0 });
+    expect(paidNothing.pockets[0].classified).toBe(0);
+    expect(paidNothing.pockets[0].unclassified).toBe(1_000_000);
+  });
+});
+
+describe("월 정산: 기초 조정이 적용되는 조건 (3절)", () => {
+  const m = member("하늘");
+  const account = asset({ kind: "cash", owner_member_id: m.id, name: "통장" });
+  const salary = planItem({ kind: "income", amount: 1_000_000, member_id: m.id });
+
+  it("직전 달 기록이 있는 자산·부채의 opening_* 은 무시한다 (월초 값은 직전 달 말 값)", () => {
+    const loan = liability({ kind: "installment", original_principal: 12_000_000, monthly_payment: 1_000_000, payer_member_id: m.id });
+    // 통장 500 → 500 (급여 100, 할부 100 상환). 스냅샷에 예전에 적어 둔 opening_* 이 남아 있다.
+    const report = computeMonthReport(
+      monthInput({
+        members: [m],
+        assets: [account],
+        liabilities: [loan],
+        planItems: [salary],
+        prevAssets: [assetSnap(account, 5_000_000)],
+        prevLiabilities: [liabilitySnap(loan, 10_000_000)],
+        curAssets: [assetSnap(account, 5_000_000, 5_000_000, { opening_value: 2_000_000, opening_principal: 2_000_000 })],
+        curLiabilities: [liabilitySnap(loan, 9_000_000, { opening_balance: 3_000_000 })],
+        entries: [actual(salary, 1_000_000)],
+      }),
+    );
+    expect(report.assetLines[0]).toMatchObject({ openValue: 5_000_000, openPrincipal: 5_000_000, adjustment: 0, contributed: 0 });
+    expect(report.liabilityLines[0]).toMatchObject({ openBalance: 10_000_000, adjustment: 0, principalPaid: 1_000_000 });
+    expect(report.adjustment).toBe(0);
+    expect(report.opening).toMatchObject({ assets: 5_000_000, liabilities: 10_000_000, netWorth: -5_000_000 });
+    expect(report.principalRepaid).toBe(1_000_000);
+    expect(report.consumption).toBe(0);
+    expect(report.savings).toBe(0);
+    expectIdentities(report);
+  });
+
+  it("직전 달에 0원으로만 남아 있던 자산·부채를 다시 등록하면 opening_* 을 기초 조정으로 쓴다", () => {
+    const pension = asset({ kind: "pension", owner_member_id: m.id, liquidity: "locked" });
+    const oldDebt = liability({ kind: "interest_only", original_principal: 5_000_000, monthly_payment: 0, payer_member_id: m.id });
+    const report = computeMonthReport(
+      monthInput({
+        members: [m],
+        assets: [account, pension],
+        liabilities: [oldDebt],
+        prevAssets: [assetSnap(account, 1_000_000), assetSnap(pension, 0, 0)],
+        prevLiabilities: [liabilitySnap(oldDebt, 0)],
+        curAssets: [
+          assetSnap(account, 1_000_000),
+          assetSnap(pension, 8_300_000, 8_000_000, { opening_value: 8_000_000, opening_principal: 8_000_000 }),
+        ],
+        curLiabilities: [liabilitySnap(oldDebt, 5_000_000, { opening_balance: 5_000_000 })],
+      }),
+    );
+    expect(report.adjustment).toBe(3_000_000);
+    expect(report.investmentGain).toBe(300_000);
+    expect(report.savings).toBe(0);
+    expect(report.newBorrowing).toBe(0);
+    expect(report.consumption).toBe(0);
+    // 월초 합계는 직전 달 말 합계 그대로다 (조정분 제외)
+    expect(report.opening).toMatchObject({ assets: 1_000_000, liabilities: 0 });
+    expectIdentities(report);
+  });
+
+  it("평가금액은 0이어도 순투입액이 남아 있던 자산은 직전 기록이 있는 것으로 본다", () => {
+    const stock = asset({ kind: "investment", owner_member_id: m.id });
+    // 지난달 전량 매도(평가 0, 순투입 −200만). 이번 달 통장에서 100만 원을 다시 넣었다.
+    const report = computeMonthReport(
+      monthInput({
+        members: [m],
+        assets: [account, stock],
+        prevAssets: [assetSnap(account, 3_000_000), assetSnap(stock, 0, -2_000_000)],
+        curAssets: [
+          assetSnap(account, 2_000_000),
+          assetSnap(stock, 1_000_000, -1_000_000, { opening_value: 500_000, opening_principal: 500_000 }),
+        ],
+      }),
+    );
+    const line = report.assetLines.find((l) => l.assetId === stock.id)!;
+    expect(line).toMatchObject({ openValue: 0, openPrincipal: -2_000_000, contributed: 1_000_000, gain: 0, adjustment: 0 });
+    expect(report.adjustment).toBe(0);
+    expect(report.savings).toBe(0);
+    expect(report.consumption).toBe(0);
+    expectIdentities(report);
+  });
+
+  it("opening_* 과 월말 값이 다르면 그 차이는 이번 달의 순투입·평가손익이다", () => {
+    const stock = asset({ kind: "investment", owner_member_id: m.id });
+    // 전부터 있던 주식(월초 평가 900만·순투입 800만)에 이번 달 통장에서 50만 원을 더 넣었고 평가는 1,000만 원이 됐다
+    const report = computeMonthReport(
+      monthInput({
+        members: [m],
+        assets: [account, stock],
+        prevAssets: [assetSnap(account, 3_000_000)],
+        curAssets: [
+          assetSnap(account, 2_500_000),
+          assetSnap(stock, 10_000_000, 8_500_000, { opening_value: 9_000_000, opening_principal: 8_000_000 }),
+        ],
+      }),
+    );
+    const line = report.assetLines.find((l) => l.assetId === stock.id)!;
+    expect(line).toMatchObject({ openValue: 9_000_000, openPrincipal: 8_000_000, contributed: 500_000, gain: 500_000, adjustment: 9_000_000 });
+    expect(report.adjustment).toBe(9_000_000);
+    expect(report.investmentGain).toBe(500_000);
+    expect(report.savings).toBe(0);
+    expect(report.consumption).toBe(0);
+    expect(report.netWorthChange).toBe(9_500_000);
+    expectIdentities(report);
+  });
+});
+
+describe("저축률과 비율 반올림 (4절: %, 소수 1자리)", () => {
+  it("소수 둘째 자리에서 반올림한다 (버림·올림이 아니다)", () => {
+    expect(percentOf(1, 3)).toBe(33.3); // 33.33… (올림이면 33.4)
+    expect(percentOf(2, 3)).toBe(66.7); // 66.66… (버림이면 66.6)
+    expect(percentOf(1, 16)).toBe(6.3); // 6.25 → 6.3
+    expect(percentOf(1, 8)).toBe(12.5);
+    expect(percentOf(3, 2)).toBe(150);
+    expect(percentOf(0, 5)).toBe(0);
+  });
+
+  it("분모가 0 이하면 비율을 만들지 않는다", () => {
+    expect(percentOf(5, 0)).toBeNull();
+    expect(percentOf(5, -1)).toBeNull();
+  });
+
+  it("수입이 0인 달은 저축률을 표시하지 않고, 저축이 음수면 저축률도 음수다", () => {
+    const m = member("하늘");
+    const account = asset({ kind: "cash", owner_member_id: m.id });
+    const salary = planItem({ kind: "income", amount: 4_000_000, member_id: m.id });
+    const run = (income: number, curCash: number) =>
+      computeMonthReport(
+        monthInput({
+          members: [m],
+          assets: [account],
+          planItems: [salary],
+          prevAssets: [assetSnap(account, 5_000_000)],
+          curAssets: [assetSnap(account, curCash)],
+          entries: [actual(salary, income)],
+        }),
+      );
+    expect(run(0, 4_000_000).savingsRate).toBeNull();
+    // 수입 400, 통장 −100 → 저축 −100, 저축률 −25%
+    const overspent = run(4_000_000, 4_000_000);
+    expect(overspent.savings).toBe(-1_000_000);
+    expect(overspent.savingsRate).toBe(-25);
   });
 });

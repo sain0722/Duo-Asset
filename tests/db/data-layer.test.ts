@@ -16,6 +16,7 @@ import {
   restoreBackup,
   saveAssetSnapshot,
   saveEntry,
+  saveMonthInputs,
   saveLiabilitySnapshot,
   updateRow,
 } from "@/lib/data/mutations";
@@ -23,6 +24,8 @@ import { exportBackup, fetchHousehold } from "@/lib/data/queries";
 import { setSupabaseClient } from "@/lib/data/supabase";
 import type { HouseholdData } from "@/lib/data/types";
 import { memberIdOf } from "@/lib/finance/meta";
+import { suggestInputs } from "@/lib/finance/suggest";
+import { currentYm } from "@/lib/month";
 import type { Asset, Goal, PlanItem } from "@/lib/finance/types";
 import { adminClient, anonClient } from "./helpers";
 
@@ -240,6 +243,49 @@ describe("동시 수정", () => {
     await expect(closeMonth(fresh, reportFor(latest, fresh))).resolves.toMatchObject({ status: "closed" });
     expect(workingMonth(await loadAs(owner))!.month > open.month).toBe(true);
   });
+
+  it("아직 끝나지 않은 달은 마감할 수 없다 (스냅샷은 월말 잔액이다)", async () => {
+    // 위에서 지난달을 마감해 이번 달이 열렸다. 모든 항목을 확인해도 달이 끝나기 전에는 마감되지 않는다.
+    let data = await loadAs(owner);
+    const open = workingMonth(data)!;
+    expect(open.month).toBe(currentYm());
+    const suggested = suggestInputs(reportFor(data, open));
+    await saveMonthInputs(open.id, {
+      assetSnapshots: reportFor(data, open)
+        .assetLines.filter((line) => !line.confirmed)
+        .map((line) => ({ asset_id: line.assetId, value: line.value, principal: line.principal })),
+      liabilitySnapshots: suggested.liabilities.map((l) => ({
+        liability_id: l.liabilityId,
+        balance: l.balance,
+        interest_paid: l.interestPaid,
+      })),
+      entries: suggested.entries.map((e) => ({
+        kind: e.kind,
+        member_id: e.memberId,
+        plan_item_id: e.planItemId,
+        name: e.name,
+        amount: e.amount,
+      })),
+    });
+    data = await loadAs(owner);
+    const complete = workingMonth(data)!;
+    const report = reportFor(data, complete);
+    expect(report.complete).toBe(true);
+
+    await expect(closeMonth(complete, report)).rejects.toThrow("아직 끝나지 않은 달");
+    // 클라이언트 검사를 건너뛰어도 DB 가 막는다
+    const direct = await owner.rpc("close_month", { p_month_id: complete.id, p_summary: report, p_version: complete.version });
+    expect(direct.error?.message).toContain("month_not_ended");
+    expect(workingMonth(await loadAs(owner))!.id).toBe(complete.id);
+
+    // 이후 테스트를 위해 확인을 되돌려 "정산 전" 상태로 만든다
+    const rows = (await loadAs(owner)).monthData[complete.id];
+    await Promise.all([
+      ...rows.assetSnapshots.map((s) => deleteRow("asset_snapshots", s.id)),
+      ...rows.liabilitySnapshots.map((s) => deleteRow("liability_snapshots", s.id)),
+      ...rows.entries.map((e) => deleteRow("month_entries", e.id)),
+    ]);
+  });
 });
 
 describe("마감과 오류 처리", () => {
@@ -289,6 +335,30 @@ describe("마감과 오류 처리", () => {
     await expect(
       insertRow("liabilities", { name: "원금 없는 지급", kind: "interest_only", original_principal: 0, monthly_payment: 100_000 }),
     ).rejects.toThrow("입력값이 올바르지 않습니다");
+  });
+});
+
+describe("기존 자산을 뒤늦게 등록", () => {
+  it("이번 달에 넣은 돈만 저축으로 잡히고 나머지는 기초 조정이 된다", async () => {
+    let data = await loadAs(owner);
+    const open = workingMonth(data)!;
+    const before = reportFor(data, open);
+    // 전부터 붓던 적금(월말 350만)을 이제야 등록한다. 이번 달에 50만 원을 넣었다.
+    const created = await createAssetWithSnapshot({
+      asset: { name: "잊고 있던 적금", kind: "savings", liquidity: "short", owner_member_id: data.members[1].id },
+      monthId: open.id,
+      value: 3_500_000,
+      principal: 3_500_000,
+      existedBefore: true,
+      contributedThisMonth: 500_000,
+    });
+    data = await loadAs(owner);
+    const after = reportFor(data, workingMonth(data)!);
+    const line = after.assetLines.find((l) => l.assetId === created.id)!;
+    expect(line.adjustment).toBe(3_000_000);
+    expect(line.contributed).toBe(500_000);
+    expect(after.adjustment - before.adjustment).toBe(3_000_000);
+    expect(after.closing.assets - before.closing.assets).toBe(3_500_000);
   });
 });
 

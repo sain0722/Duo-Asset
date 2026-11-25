@@ -113,9 +113,11 @@ export async function seedDemo(options: { suffix?: string; closedMonths?: number
     if (error) throw new Error(`계정 생성 실패 (${email}): ${error.message}`);
   }
 
-  // 2. 가구: 기준 월은 (마감할 달 수 + 1)개월 전
+  // 2. 가구: 지난달까지 기록이 있고, 지난달은 아직 정산하지 않은 상태를 만든다
+  //    (월초에 "지난달 정산을 마무리하세요"가 뜨는 가장 흔한 상황. 끝나지 않은 달은 마감할 수 없다.)
   const thisMonth = currentYm();
-  const baselineMonth = addMonths(thisMonth, -(closedMonths + 1));
+  const workingMonthYm = addMonths(thisMonth, -1);
+  const baselineMonth = addMonths(workingMonthYm, -(closedMonths + 1));
   setSupabaseClient(await signedInClient(stack, partnerEmail));
   if ((await claimMembership()) !== null) throw new Error("초대 전인데 가구에 연결됐습니다.");
 
@@ -229,7 +231,7 @@ export async function seedDemo(options: { suffix?: string; closedMonths?: number
   for (let i = 0; i <= closedMonths; i++) {
     data = await load();
     const month = workingMonth(data)!;
-    const isCurrent = month.month === thisMonth;
+    const isCurrent = month.month === workingMonthYm;
     const hasBonus = [1, 7].includes(ymParts(month.month).month);
 
     // 하늘: 급여 − 공용 − 할부 − 부모님 − 주식 − 통신·보험 − 개인 지출
@@ -252,7 +254,7 @@ export async function seedDemo(options: { suffix?: string; closedMonths?: number
     balance.car.value -= 250_000;
     carBalance -= 500_000;
 
-    // 이번 달(진행 중)은 일부만 입력해 "정산 대기" 상태를 보여 준다
+    // 정산할 달(지난달)은 일부만 입력해 "정산 대기" 상태를 보여 준다
     const confirmedKeys = isCurrent ? ["hAccount", "joint"] : Object.keys(balance);
     for (const key of confirmedKeys) {
       await saveAssetSnapshot(month.id, assets[key].id, undefined, balance[key]);
@@ -340,7 +342,7 @@ export async function seedDemo(options: { suffix?: string; closedMonths?: number
   });
 
   setSupabaseClient(undefined);
-  log(`\n가상 데이터 생성 완료 (${baselineMonth} ~ ${thisMonth})`);
+  log(`\n가상 데이터 생성 완료 (${baselineMonth} ~ ${workingMonthYm}, ${workingMonthYm} 은 정산 대기)`);
   log(`  본인   ${ownerEmail}`);
   log(`  배우자 ${partnerEmail}`);
   log(`  비밀번호 ${DEMO_PASSWORD}`);

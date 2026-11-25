@@ -209,6 +209,8 @@ create table public.asset_snapshots (
   -- 직전 달 스냅샷이 없는 "기존 보유 자산"의 월초 값. 수입·저축 계산에서 제외(기초 조정)하기 위함.
   opening_value bigint,
   opening_principal bigint,
+  -- 평가 기준일. null = 그 달 말일 (분기 명세서 값처럼 월말 값이 아닐 때만 적는다)
+  valued_on date,
   version int not null default 1,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -347,7 +349,7 @@ create table public.future_events (
   scenario_id uuid,
   name text not null check (length(btrim(name)) between 1 and 60),
   kind text not null check (kind in (
-    'income_change', 'expense_change', 'one_time', 'loan', 'home_move_in', 'parental_leave'
+    'income_change', 'expense_change', 'one_time', 'loan', 'home_move_in', 'home_sale', 'loan_payoff', 'parental_leave'
   )),
   month public.ym not null,
   params jsonb not null default '{}'::jsonb,
@@ -393,10 +395,22 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  v_status text;
 begin
   update public.months
      set updated_at = now()
-   where id = coalesce(new.month_id, old.month_id);
+   where id = coalesce(new.month_id, old.month_id)
+  returning status into v_status;
+
+  -- RLS 는 문장이 시작될 때의 상태로 "열린 달"을 판단한다. 마감과 거의 동시에 들어온 쓰기는
+  -- 위 update 에서 마감 트랜잭션이 끝나기를 기다린 뒤 여기에 도착하므로, 이때 닫혀 있으면 되돌린다.
+  -- (가구 삭제 같은 연쇄 삭제와 백업 복원은 예외)
+  if v_status = 'closed'
+     and pg_trigger_depth() = 1
+     and coalesce(current_setting('duoasset.restoring', true), '') <> 'on' then
+    raise exception 'month_not_open' using errcode = '55000';
+  end if;
   return null;
 end;
 $$;
@@ -534,7 +548,7 @@ grant select on public.months to authenticated;
 grant update (note, version) on public.months to authenticated;
 
 grant select, insert, delete on public.asset_snapshots to authenticated;
-grant update (value, principal, opening_value, opening_principal, version)
+grant update (value, principal, opening_value, opening_principal, valued_on, version)
   on public.asset_snapshots to authenticated;
 
 grant select, insert, delete on public.liability_snapshots to authenticated;
@@ -659,6 +673,9 @@ begin
     raise exception 'month_incomplete' using errcode = '22023';
   end if;
 
+  -- 같은 가구의 마감·재개·복원을 한 번에 하나씩만 실행한다 (동시에 실행돼 "닫힌 달은 앞쪽에 연속"이 깨지는 것을 막는다)
+  perform 1 from public.households h where h.id = v_household for update;
+
   select * into v_month from public.months m
    where m.id = p_month_id and m.household_id = v_household
      for update;
@@ -677,6 +694,10 @@ begin
   ) then
     raise exception 'earlier_month_open' using errcode = '55000';
   end if;
+  -- 스냅샷은 월말 잔액이다. 달이 끝나기 전에 마감하면 그 뒤의 수입·지출이 다음 달 계산에 섞인다.
+  if v_month.month >= to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM') then
+    raise exception 'month_not_ended' using errcode = '55000';
+  end if;
 
   update public.months m
      set status = 'closed',
@@ -690,6 +711,9 @@ begin
   insert into public.months (household_id, month)
   values (v_household, v_next)
   on conflict (household_id, month) do nothing;
+  -- 다음 달의 월초 값이 바뀌었으므로 version 을 올린다 (오래된 화면에서 계산한 결과로 다음 달을 마감하지 못하게)
+  update public.months m set updated_at = now()
+   where m.household_id = v_household and m.month = v_next;
 
   return v_month;
 end;
@@ -709,6 +733,8 @@ begin
   if v_household is null then
     raise exception 'not_a_member' using errcode = '42501';
   end if;
+
+  perform 1 from public.households h where h.id = v_household for update;
 
   select * into v_month from public.months m
    where m.id = p_month_id and m.household_id = v_household
@@ -731,6 +757,10 @@ begin
      set status = 'open', closed_at = null, closed_by = null
    where m.id = p_month_id
   returning * into v_month;
+
+  -- 이 달을 고치면 다음 달의 월초 값이 달라진다: 다음 달의 version 도 올린다
+  update public.months m set updated_at = now()
+   where m.household_id = v_household and m.month > v_month.month;
 
   return v_month;
 end;

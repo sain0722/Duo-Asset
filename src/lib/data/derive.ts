@@ -354,6 +354,7 @@ export function goalsView(data: HouseholdData, currentMonth: Ym): GoalsView {
   const progress = computeGoalProgress({
     goals: data.goals,
     allocations: data.goalAllocations,
+    assets: data.assets,
     assetValues: position.assetValues,
     totals: position.totals,
     currentMonth,

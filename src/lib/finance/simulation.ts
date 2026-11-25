@@ -7,9 +7,11 @@ import type {
   ExpenseChangeParams,
   FutureEvent,
   HomeMoveInParams,
+  HomeSaleParams,
   IncomeChangeParams,
   Liability,
   LoanParams,
+  LoanPayoffParams,
   OneTimeParams,
   ParentalLeaveParams,
   RepaymentMethod,
@@ -70,9 +72,15 @@ type Effect =
       method: RepaymentMethod;
       toAsset: boolean;
       realEstate: boolean;
+      /** 이 대출을 만든 이벤트 (상환 이벤트가 가리킬 수 있게) */
+      eventId: string;
     }
   /** 분양 납부금을 부동산으로 전환 */
-  | { type: "presale_to_real_estate"; month: Ym };
+  | { type: "presale_to_real_estate"; month: Ym }
+  /** 보유 부동산 전체를 팔아 현금으로 */
+  | { type: "sell_real_estate"; month: Ym; salePrice: Won }
+  /** 지정한 대출의 남은 원금을 현금으로 한 번에 갚는다 */
+  | { type: "repay"; month: Ym; liabilityId: string };
 
 export function expandEvent(event: FutureEvent): Effect[] {
   const month = event.month;
@@ -104,6 +112,7 @@ export function expandEvent(event: FutureEvent): Effect[] {
           method: p.method,
           toAsset: p.toAsset,
           realEstate: false,
+          eventId: event.id,
         },
       ];
     }
@@ -121,6 +130,7 @@ export function expandEvent(event: FutureEvent): Effect[] {
           method: p.loanMethod,
           toAsset: true,
           realEstate: true,
+          eventId: event.id,
         });
       }
       // 잔금 중 대출로 치르지 않은 부분은 현금으로 낸다 (대출이 더 크면 차액이 현금으로 남는다)
@@ -134,6 +144,17 @@ export function expandEvent(event: FutureEvent): Effect[] {
         effects.push({ type: "expense_delta", amount: p.monthlyExpenseDelta, from: month, to: null });
       }
       return effects;
+    }
+    case "home_sale": {
+      const p = event.params as HomeSaleParams;
+      return [
+        { type: "sell_real_estate", month, salePrice: p.salePrice },
+        ...p.repayLiabilityIds.map((liabilityId) => ({ type: "repay" as const, month, liabilityId })),
+      ];
+    }
+    case "loan_payoff": {
+      const p = event.params as LoanPayoffParams;
+      return [{ type: "repay", month, liabilityId: p.liabilityId }];
     }
     case "parental_leave": {
       const p = event.params as ParentalLeaveParams;
@@ -168,6 +189,8 @@ function inRange(month: Ym, from: Ym, to: Ym | null): boolean {
 }
 
 interface Loan {
+  /** 부채 id, 또는 이벤트로 생긴 대출이면 그 이벤트 id */
+  id: string;
   name: string;
   liability: Liability;
   balance: Won;
@@ -177,6 +200,7 @@ interface Loan {
 
 function loanFromEffect(effect: Extract<Effect, { type: "borrow" }>, index: number): Loan {
   return {
+    id: effect.eventId,
     name: effect.name,
     balance: effect.principal,
     regularPayment: 0,
@@ -245,6 +269,7 @@ export function simulate(input: SimulationInput): SimulationResult {
     // 보관 여부가 아니라 남은 원금으로 판단한다
     .filter((liability) => (input.liabilityBalances[liability.id] ?? 0) > 0)
     .map((liability) => ({
+      id: liability.id,
       name: liability.name,
       liability,
       balance: input.liabilityBalances[liability.id],
@@ -322,7 +347,8 @@ export function simulate(input: SimulationInput): SimulationResult {
     }
     consumption = Math.max(consumption - assumptions.monthlySavingsAdjust, 0);
 
-    // 3. 이벤트: 일회성 수입·지출, 자산 취득, 대출 실행
+    // 3. 이벤트: 일회성 수입·지출, 자산 취득·매도, 대출 실행·일시 상환
+    let earlyRepaid = 0;
     for (const e of effects) {
       if (e.type === "one_off" && e.month === month) {
         if (e.amount >= 0) income += e.amount;
@@ -339,6 +365,18 @@ export function simulate(input: SimulationInput): SimulationResult {
       } else if (e.type === "presale_to_real_estate" && e.month === month) {
         realEstate += presale;
         presale = 0;
+      } else if (e.type === "sell_real_estate" && e.month === month) {
+        // 추정 평가액과 매도 대금의 차이는 그대로 순자산에 반영된다
+        cash += e.salePrice;
+        realEstate = 0;
+      } else if (e.type === "repay" && e.month === month) {
+        for (const loan of loans) {
+          if (loan.id !== e.liabilityId || loan.balance <= 0) continue;
+          cash -= loan.balance;
+          earlyRepaid += loan.balance;
+          loan.balance = 0;
+          milestones.push({ month, kind: "debt_paid_off", label: `${loan.name} 상환 완료`, amount: loan.regularPayment });
+        }
       }
     }
 
@@ -406,7 +444,7 @@ export function simulate(input: SimulationInput): SimulationResult {
       income,
       consumption,
       savings,
-      debtPayment: principalPaid + interestPaid,
+      debtPayment: principalPaid + interestPaid + earlyRepaid,
     });
   }
 

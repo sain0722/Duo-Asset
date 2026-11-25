@@ -38,28 +38,42 @@ begin
     raise exception 'invalid_backup' using errcode = '22023';
   end if;
 
+  -- 마감·재개와 겹치지 않게 가구 단위로 직렬화하고, 닫힌 달의 행을 넣을 수 있게 표시한다 (touch_month 참고)
+  perform 1 from public.households h where h.id = v_household for update;
+  perform set_config('duoasset.restoring', 'on', true);
+
   select count(*) into v_count from public.members m where m.household_id = v_household;
   if jsonb_array_length(p_backup->'members') <> v_count then
     raise exception 'member_mismatch' using errcode = '22023';
   end if;
 
-  -- 구성원 id 치환: 백업 속 id → 자리표시자 → 현재 id (두 단계로 해야 서로 뒤바뀐 경우에도 안전하다)
-  v_text := p_backup::text;
-  for v_member in
-    select b.value->>'id' as old_id,
-           row_number() over (order by (b.value->>'sort_order')::int, b.value->>'id') as rn
-    from jsonb_array_elements(p_backup->'members') b
-  loop
-    v_text := replace(v_text, v_member.old_id, '@@member-' || v_member.rn || '@@');
-  end loop;
-  for v_member in
-    select m.id, row_number() over (order by m.sort_order, m.id) as rn
-    from public.members m
-    where m.household_id = v_household
-  loop
-    v_text := replace(v_text, '@@member-' || v_member.rn || '@@', v_member.id::text);
-  end loop;
-  p_backup := v_text::jsonb;
+  -- 구성원 id 치환. 같은 가구의 백업이면(구성원 id 가 모두 그대로면) 건드리지 않는다.
+  -- 다른 프로젝트에서 온 백업만 정렬 순서대로 현재 구성원에 대응시킨다:
+  -- 백업 속 id → 자리표시자 → 현재 id (두 단계로 해야 서로 뒤바뀐 경우에도 안전하다)
+  if exists (
+    select 1 from jsonb_array_elements(p_backup->'members') b
+    where not exists (
+      select 1 from public.members m
+      where m.household_id = v_household and m.id::text = b.value->>'id'
+    )
+  ) then
+    v_text := p_backup::text;
+    for v_member in
+      select b.value->>'id' as old_id,
+             row_number() over (order by (b.value->>'sort_order')::int, b.value->>'id') as rn
+      from jsonb_array_elements(p_backup->'members') b
+    loop
+      v_text := replace(v_text, v_member.old_id, '@@member-' || v_member.rn || '@@');
+    end loop;
+    for v_member in
+      select m.id, row_number() over (order by m.sort_order, m.id) as rn
+      from public.members m
+      where m.household_id = v_household
+    loop
+      v_text := replace(v_text, '@@member-' || v_member.rn || '@@', v_member.id::text);
+    end loop;
+    p_backup := v_text::jsonb;
+  end if;
 
   -- 기존 데이터 삭제 (자식 → 부모 순)
   delete from public.goal_allocations where household_id = v_household;
@@ -112,8 +126,17 @@ begin
   insert into public.future_events
   select * from jsonb_populate_recordset(null::public.future_events, public.backup_rows(p_backup->'events', v_household));
 
-  -- 복원 결과가 앱의 전제(월이 하나 이상, 닫힌 달은 앞쪽에 연속, 기본 시나리오 하나)를 지키는지 확인
-  if not exists (select 1 from public.months m where m.household_id = v_household) then
+  -- 복원 결과가 앱의 전제를 지키는지 확인: 열린 달이 있고, 월이 빈칸 없이 이어지고, 닫힌 달은 앞쪽에 연속
+  if not exists (select 1 from public.months m where m.household_id = v_household and m.status = 'open') then
+    raise exception 'invalid_backup' using errcode = '22023';
+  end if;
+  if (
+    select count(*) <> (
+      (extract(year from max((m.month || '-01')::date)) - extract(year from min((m.month || '-01')::date))) * 12
+      + extract(month from max((m.month || '-01')::date)) - extract(month from min((m.month || '-01')::date)) + 1
+    )
+    from public.months m where m.household_id = v_household
+  ) then
     raise exception 'invalid_backup' using errcode = '22023';
   end if;
   if exists (
@@ -122,9 +145,6 @@ begin
     join public.months c on c.household_id = o.household_id and c.month > o.month
     where o.household_id = v_household and o.status = 'open' and c.status = 'closed'
   ) then
-    raise exception 'invalid_backup' using errcode = '22023';
-  end if;
-  if (select count(*) from public.scenarios s where s.household_id = v_household and s.is_base) <> 1 then
     raise exception 'invalid_backup' using errcode = '22023';
   end if;
 end;

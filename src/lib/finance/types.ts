@@ -141,6 +141,8 @@ export interface AssetSnapshot {
   principal: Won;
   opening_value: Won | null;
   opening_principal: Won | null;
+  /** 평가 기준일 'YYYY-MM-DD'. null = 그 달 말일 (분기 명세서 값처럼 월말 값이 아닐 때만 적는다) */
+  valued_on: string | null;
   version: number;
   updated_at: string;
 }
@@ -220,6 +222,8 @@ export type FutureEventKind =
   | "one_time"
   | "loan"
   | "home_move_in"
+  | "home_sale"
+  | "loan_payoff"
   | "parental_leave";
 
 export interface FutureEvent {
@@ -547,6 +551,8 @@ export type FutureEventParams =
   | OneTimeParams
   | LoanParams
   | HomeMoveInParams
+  | HomeSaleParams
+  | LoanPayoffParams
   | ParentalLeaveParams;
 
 /** 소득 변화: 이직·연봉 인상·퇴직 등 */
@@ -595,6 +601,20 @@ export interface HomeMoveInParams {
   depositReturn: Won;
   /** 입주 후 월 주거비 증감 */
   monthlyExpenseDelta: Won;
+}
+
+/** 주택 매도 (갈아타기): 보유 부동산 전체를 팔고, 지정한 대출을 매도 대금으로 갚는다 */
+export interface HomeSaleParams {
+  /** 매도 대금 (현금으로 들어온다) */
+  salePrice: Won;
+  /** 함께 갚을 대출: 부채 id 또는 대출을 만든 이벤트(대출 발생·주택 입주)의 id */
+  repayLiabilityIds: string[];
+}
+
+/** 대출 종료: 남은 원금을 현금으로 한 번에 갚는다 */
+export interface LoanPayoffParams {
+  /** 부채 id 또는 대출을 만든 이벤트의 id */
+  liabilityId: string;
 }
 
 /** 출산·육아휴직 */

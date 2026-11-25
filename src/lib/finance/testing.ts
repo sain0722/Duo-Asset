@@ -106,6 +106,7 @@ export function assetSnap(
     principal,
     opening_value: null,
     opening_principal: null,
+    valued_on: null,
     version: 1,
     updated_at: stamp(),
     ...overrides,

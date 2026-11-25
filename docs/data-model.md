@@ -41,7 +41,7 @@
 | 테이블 | 설명 | 주요 컬럼 |
 |--------|------|-----------|
 | `months` | 달 하나 | `month`, `status`(open / closed), `summary`(마감 시 동결한 `MonthReport`), `closed_at`, `closed_by` |
-| `asset_snapshots` | 월말 자산 값 | `value`(평가금액), `principal`(누적 순투입액), `opening_value / opening_principal`(기존 보유분 뒤늦은 등록) |
+| `asset_snapshots` | 월말 자산 값 | `value`(평가금액), `principal`(누적 순투입액), `opening_value / opening_principal`(기존 보유분 뒤늦은 등록), `valued_on`(평가 기준일, null = 그 달 말일) |
 | `liability_snapshots` | 월말 부채 값 | `balance`(남은 원금), `interest_paid`(실제 이자, null = 미확인), `opening_balance` |
 | `month_entries` | 실제 금액 | `kind`(income / expense / contribution / transfer), `member_id`, `to_member_id`, `plan_item_id`, `amount` |
 
@@ -68,7 +68,7 @@
 |------|------|
 | `create_household(name, my_name, partner_name, partner_email, start_month)` | 첫 사용자가 가구·구성원 2명·기본 시나리오·기준 월을 만든다 |
 | `claim_membership()` | 초대된 이메일로 로그인한 사용자를 구성원으로 연결한다 (이메일 인증된 계정만) |
-| `close_month(month_id, summary, version)` | 가장 이른 열린 달을 마감하고 다음 달을 연다 |
+| `close_month(month_id, summary, version)` | 가장 이른 열린 달을 마감하고 다음 달을 연다. 이미 끝난 달이고 미확인 항목이 없어야 한다 |
 | `reopen_month(month_id)` | 가장 최근에 마감한 달을 다시 연다 (`summary`는 남겨 계획을 유지) |
 | `restore_backup(backup)` | 백업 파일로 현재 가구의 재무 데이터를 통째로 교체한다. 한 트랜잭션이며 모든 행을 호출자의 가구로 강제한다 |
 | `ping()` | 무료 플랜 일시중지 방지용. 유일하게 비로그인 호출이 가능하며 데이터를 읽지 않는다 |

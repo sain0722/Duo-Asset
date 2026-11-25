@@ -31,6 +31,7 @@ const RPC_MESSAGES: Record<string, string> = {
   version_conflict: "다른 기기에서 먼저 수정했습니다. 다시 확인해 주세요.",
   month_not_open: "이미 마감된 달입니다.",
   month_incomplete: "미확인 항목이 남아 있어 마감할 수 없습니다.",
+  month_not_ended: "아직 끝나지 않은 달은 마감할 수 없습니다. 다음 달 1일부터 마감할 수 있습니다.",
   month_not_closed: "마감되지 않은 달입니다.",
   earlier_month_open: "이전 달을 먼저 마감해 주세요.",
   later_month_closed: "가장 최근에 마감한 달만 다시 열 수 있습니다.",

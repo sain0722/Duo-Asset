@@ -159,5 +159,7 @@ export const EVENT_KIND_LABELS: Record<FutureEventKind, string> = {
   one_time: "일회성 지출·수입",
   loan: "대출 발생",
   home_move_in: "주택 입주",
+  home_sale: "주택 매도",
+  loan_payoff: "대출 상환 완료",
   parental_leave: "출산·육아휴직",
 };

@@ -1,4 +1,5 @@
 import { addMonths, diffMonths, ymOfDateString } from "@/lib/month";
+import { ASSET_KINDS } from "./meta";
 import { percentOf } from "./settlement";
 import type {
   Asset,
@@ -24,6 +25,8 @@ function bySortOrder(a: Goal, b: Goal): number {
 export function computeGoalProgress(args: {
   goals: Goal[];
   allocations: GoalAllocation[];
+  /** 배정된 금액이 가용자산·금융자산 중 어디에 속하는지 알기 위해 필요하다 (없으면 차감하지 않는다) */
+  assets?: Asset[];
   /** 자산 id → 현재 평가금액 */
   assetValues: Record<string, Won>;
   totals: BalanceTotals;
@@ -31,55 +34,83 @@ export function computeGoalProgress(args: {
   /** 기본 시나리오 시뮬레이션 결과 (순자산·금융자산 목표의 예상 달성 시점에 사용) */
   projection?: SimulationPoint[];
 }): GoalProgress[] {
-  const { goals, allocations, assetValues, totals, currentMonth, projection } = args;
+  const { goals, allocations, assets = [], assetValues, totals, currentMonth, projection } = args;
   const remainingByAsset = new Map<string, Won>(
     Object.entries(assetValues).map(([id, value]) => [id, Math.max(value, 0)]),
   );
+  const active = goals.filter((goal) => !goal.is_archived).sort(bySortOrder);
 
-  return goals
-    .filter((goal) => !goal.is_archived)
-    .sort(bySortOrder)
-    .map((goal) => {
-      const allocated: GoalProgress["allocations"] = [];
-      let shortfall = 0;
+  // 1. 자산을 연결한 목표부터 우선순위대로 배정한다
+  const allocatedByGoal = new Map<string, GoalProgress["allocations"]>();
+  const shortfallByGoal = new Map<string, Won>();
+  for (const goal of active) {
+    if (goal.basis !== "linked") continue;
+    const allocated: GoalProgress["allocations"] = [];
+    let total = 0;
+    let shortfall = 0;
+    for (const allocation of allocations.filter((a) => a.goal_id === goal.id)) {
+      const available = remainingByAsset.get(allocation.asset_id) ?? 0;
+      // "남은 전부"도 이 목표에 필요한 만큼만 가져간다 (다음 목표가 같은 자산을 쓸 수 있게)
+      const wanted = allocation.amount ?? Math.max(goal.target_amount - total, 0);
+      const amount = Math.min(wanted, available);
+      remainingByAsset.set(allocation.asset_id, available - amount);
+      total += amount;
+      if (allocation.amount !== null) shortfall += allocation.amount - amount;
+      allocated.push({ assetId: allocation.asset_id, requested: allocation.amount, allocated: amount });
+    }
+    allocatedByGoal.set(goal.id, allocated);
+    shortfallByGoal.set(goal.id, shortfall);
+  }
 
-      if (goal.basis === "linked") {
-        for (const allocation of allocations.filter((a) => a.goal_id === goal.id)) {
-          const available = remainingByAsset.get(allocation.asset_id) ?? 0;
-          const amount = Math.min(allocation.amount ?? available, available);
-          remainingByAsset.set(allocation.asset_id, available - amount);
-          if (allocation.amount !== null) shortfall += allocation.amount - amount;
-          allocated.push({ assetId: allocation.asset_id, requested: allocation.amount, allocated: amount });
-        }
-      }
+  // 2. 가용자산·금융자산 기준 목표는 다른 목표에 이미 배정된 금액을 빼고 본다 (같은 돈을 두 번 세지 않는다)
+  const all = [...allocatedByGoal.values()].flat();
+  const reservedLiquid = sumAllocated(all, assets, (asset) => asset.liquidity === "liquid");
+  const reservedFinancial = sumAllocated(all, assets, (asset) => ASSET_KINDS[asset.kind].financial);
 
-      const current = currentAmount(goal, allocated, totals);
-      const target = goal.target_amount;
-      const remaining = Math.max(target - current, 0);
-      const achieved = current >= target;
+  return active.map((goal) => {
+    const allocated = allocatedByGoal.get(goal.id) ?? [];
+    const current = currentAmount(goal, allocated, totals, reservedLiquid, reservedFinancial);
+    const target = goal.target_amount;
+    const remaining = Math.max(target - current, 0);
+    const achieved = current >= target;
 
-      let requiredMonthly: Won | null = null;
-      if (!achieved && goal.target_date) {
-        const monthsLeft = diffMonths(currentMonth, ymOfDateString(goal.target_date));
-        if (monthsLeft > 0) requiredMonthly = Math.ceil(remaining / monthsLeft);
-      }
+    let requiredMonthly: Won | null = null;
+    if (!achieved && goal.target_date) {
+      const monthsLeft = diffMonths(currentMonth, ymOfDateString(goal.target_date));
+      if (monthsLeft > 0) requiredMonthly = Math.ceil(remaining / monthsLeft);
+    }
 
-      return {
-        goalId: goal.id,
-        current,
-        target,
-        percent: Math.max(percentOf(current, target) ?? 0, 0),
-        remaining,
-        requiredMonthly,
-        expectedMonth: achieved ? null : expectedMonth(goal, remaining, currentMonth, projection),
-        achieved,
-        allocations: allocated,
-        shortfall,
-      };
-    });
+    return {
+      goalId: goal.id,
+      current,
+      target,
+      percent: Math.max(percentOf(current, target) ?? 0, 0),
+      remaining,
+      requiredMonthly,
+      expectedMonth: achieved ? null : expectedMonth(goal, remaining, currentMonth, projection, reservedFinancial),
+      achieved,
+      allocations: allocated,
+      shortfall: shortfallByGoal.get(goal.id) ?? 0,
+    };
+  });
 }
 
-function currentAmount(goal: Goal, allocated: GoalProgress["allocations"], totals: BalanceTotals): Won {
+function sumAllocated(
+  allocations: GoalProgress["allocations"],
+  assets: Asset[],
+  include: (asset: Asset) => boolean,
+): Won {
+  const ids = new Set(assets.filter(include).map((asset) => asset.id));
+  return allocations.reduce((total, a) => total + (ids.has(a.assetId) ? a.allocated : 0), 0);
+}
+
+function currentAmount(
+  goal: Goal,
+  allocated: GoalProgress["allocations"],
+  totals: BalanceTotals,
+  reservedLiquid: Won,
+  reservedFinancial: Won,
+): Won {
   switch (goal.basis) {
     case "linked":
       return allocated.reduce((total, a) => total + a.allocated, 0);
@@ -88,9 +119,9 @@ function currentAmount(goal: Goal, allocated: GoalProgress["allocations"], total
     case "net_worth":
       return totals.netWorth;
     case "liquid_assets":
-      return totals.liquid;
+      return totals.liquid - reservedLiquid;
     case "financial_assets":
-      return totals.financial;
+      return totals.financial - reservedFinancial;
   }
 }
 
@@ -99,13 +130,14 @@ function expectedMonth(
   remaining: Won,
   currentMonth: Ym,
   projection: SimulationPoint[] | undefined,
+  reservedFinancial: Won,
 ): Ym | null {
   // 순자산·금융자산 목표는 시뮬레이션 추이에서 처음 목표를 넘는 달
   if (projection && (goal.basis === "net_worth" || goal.basis === "financial_assets")) {
     const hit = projection.find((point) =>
       goal.basis === "net_worth"
         ? point.netWorth >= goal.target_amount
-        : point.cash + point.invested >= goal.target_amount,
+        : point.cash + point.invested - reservedFinancial >= goal.target_amount,
     );
     return hit?.month ?? null;
   }

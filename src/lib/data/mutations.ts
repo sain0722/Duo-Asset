@@ -2,12 +2,14 @@ import type {
   Asset,
   AssetSnapshot,
   LiabilitySnapshot,
+  Member,
   MonthEntry,
   MonthReport,
   MonthRow,
   Won,
   Ym,
 } from "@/lib/finance/types";
+import { compareYm, currentYm } from "@/lib/month";
 import { ConflictError, toAppError } from "./errors";
 import type { TableName } from "./queries";
 import type { BackupFile } from "./types";
@@ -66,6 +68,36 @@ export async function deleteRow(table: TableName, id: string): Promise<void> {
   if (!data?.length) throw new ConflictError();
 }
 
+// ───────────────────────── 가구 · 구성원 ─────────────────────────
+// 이 두 테이블에는 version 이 없다 (이름·초대 이메일만 고친다).
+
+export async function updateHouseholdName(householdId: string, name: string): Promise<void> {
+  const { data, error } = await getSupabase()
+    .from("households")
+    .update({ name: name.trim() })
+    .eq("id", householdId)
+    .select("id");
+  if (error) throw toAppError(error);
+  if (!data?.length) throw new ConflictError();
+}
+
+/** 구성원 이름·초대 이메일을 고친다. 이메일은 소문자로 저장하고, 비우면 초대를 취소한다(null). */
+export async function updateMember(
+  memberId: string,
+  patch: { name?: string; email?: string | null },
+): Promise<Member> {
+  const values: { name?: string; email?: string | null } = {};
+  if (patch.name !== undefined) values.name = patch.name.trim();
+  if (patch.email !== undefined) values.email = patch.email?.trim().toLowerCase() || null;
+  const { data, error } = await getSupabase().from("members").update(values).eq("id", memberId).select().maybeSingle();
+  if (error) {
+    if (error.code === "23505") throw new Error("이미 다른 구성원에게 쓰인 이메일입니다.");
+    throw toAppError(error);
+  }
+  if (!data) throw new ConflictError();
+  return data as Member;
+}
+
 // ───────────────────────── 월별 입력 ─────────────────────────
 
 export interface AssetSnapshotValues {
@@ -73,6 +105,8 @@ export interface AssetSnapshotValues {
   principal: Won;
   opening_value?: Won | null;
   opening_principal?: Won | null;
+  /** 평가 기준일 'YYYY-MM-DD' (월말 값이 아닐 때만) */
+  valued_on?: string | null;
 }
 
 /** 자산의 월말 값을 기록한다. 이미 있으면 수정, 없으면 새로 만든다. */
@@ -146,12 +180,42 @@ function dropUndefined<T extends Record<string, unknown>>(value: T): Partial<T> 
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
 
+/**
+ * 여러 항목을 한 번에 확인한다 ("예정대로 한 번에 확인", "나머지 모두 변동 없음").
+ * 테이블마다 한 번씩만 요청하므로 재조회도 한 번이면 된다. 아직 행이 없는 항목만 넣는다.
+ */
+export async function saveMonthInputs(
+  monthId: string,
+  inputs: {
+    assetSnapshots?: (AssetSnapshotValues & { asset_id: string })[];
+    liabilitySnapshots?: (LiabilitySnapshotValues & { liability_id: string })[];
+    entries?: EntryValues[];
+  },
+): Promise<void> {
+  const batches: [TableName, Record<string, unknown>[]][] = [
+    ["asset_snapshots", (inputs.assetSnapshots ?? []).map((row) => ({ month_id: monthId, ...row }))],
+    ["liability_snapshots", (inputs.liabilitySnapshots ?? []).map((row) => ({ month_id: monthId, ...row }))],
+    ["month_entries", (inputs.entries ?? []).map((row) => ({ month_id: monthId, ...row }))],
+  ];
+  for (const [table, rows] of batches) {
+    if (rows.length === 0) continue;
+    const { error } = await getSupabase().from(table).insert(rows);
+    if (error) {
+      // 그 사이 배우자가 같은 항목을 먼저 확인했다
+      if (error.code === "23505") throw new ConflictError();
+      throw insertError(error);
+    }
+  }
+}
+
 // ───────────────────────── 자산 등록 ─────────────────────────
 
 /**
  * 자산을 만들고 현재 열린 달에 첫 스냅샷을 기록한다.
  * existedBefore = true 면 "전부터 갖고 있던 자산"으로 보고 월초 값도 같이 적어
  * 이번 달 저축·소비 계산에 영향을 주지 않게 한다 (기초 조정).
+ * 그 자산에 이번 달에 넣은 돈이 있다면 contributedThisMonth 로 알려 준다:
+ * 월초 값 = 월말 값 − 이번 달에 넣은 돈 이 되어, 그 금액만 이번 달 저축으로 잡힌다.
  */
 export async function createAssetWithSnapshot(args: {
   asset: Partial<NewRow<Asset>>;
@@ -159,7 +223,9 @@ export async function createAssetWithSnapshot(args: {
   value: Won;
   principal: Won;
   existedBefore: boolean;
+  contributedThisMonth?: Won;
 }): Promise<Asset> {
+  const contributed = args.contributedThisMonth ?? 0;
   const asset = await insertRow<Asset>("assets", args.asset);
   try {
     await insertOnce<AssetSnapshot>("asset_snapshots", {
@@ -167,8 +233,8 @@ export async function createAssetWithSnapshot(args: {
       asset_id: asset.id,
       value: args.value,
       principal: args.principal,
-      opening_value: args.existedBefore ? args.value : null,
-      opening_principal: args.existedBefore ? args.principal : null,
+      opening_value: args.existedBefore ? args.value - contributed : null,
+      opening_principal: args.existedBefore ? args.principal - contributed : null,
     });
   } catch (error) {
     // 스냅샷 없이 자산만 남지 않도록 되돌린다
@@ -212,6 +278,10 @@ export async function closeMonth(month: MonthRow, report: MonthReport): Promise<
   // 미확인 항목의 잠정값(계획 금액·전월 잔액)이 확정 결과로 동결되지 않게 한다
   if (!report.complete || report.month !== month.month) {
     throw new Error("미확인 항목이 남아 있어 마감할 수 없습니다.");
+  }
+  // 스냅샷은 월말 잔액이다. 달이 끝나기 전에 마감하면 그 뒤에 들어온 급여가 다음 달 계산에 섞인다.
+  if (compareYm(month.month, currentYm()) >= 0) {
+    throw new Error("아직 끝나지 않은 달은 마감할 수 없습니다. 다음 달 1일부터 마감할 수 있습니다.");
   }
   return rpc<MonthRow>("close_month", {
     p_month_id: month.id,

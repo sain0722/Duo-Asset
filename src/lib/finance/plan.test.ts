@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildMonthPlan, isPlanItemActive } from "./plan";
+import { buildMonthPlan, buildPlanLines, isPlanItemActive, plannedJointConsumption, plannedMemberConsumption } from "./plan";
 import { liability, member, planItem } from "./testing";
 import { JOINT } from "./types";
 
@@ -178,5 +178,179 @@ describe("월급 배분", () => {
 
   it("공동 주머니 줄은 pocket 이 joint 다", () => {
     expect(build().joint.lines.every((line) => line.pocket === JOINT)).toBe(true);
+  });
+});
+
+describe("초과 배분 (6절: 사용 가능 금액이 음수면 0으로 본다)", () => {
+  const haneul = member("하늘");
+  const bada = member("바다");
+  const parentsLoan = liability({
+    kind: "interest_only",
+    payer_member_id: haneul.id,
+    original_principal: 30_000_000,
+    monthly_payment: 300_000,
+  });
+  const plan = buildMonthPlan({
+    month: "2026-03",
+    members: [haneul, bada],
+    planItems: [
+      planItem({ kind: "income", amount: 4_000_000, member_id: haneul.id }),
+      planItem({ kind: "expense", amount: 100_000, member_id: haneul.id, name: "통신비" }),
+      planItem({ kind: "contribution", amount: 2_000_000, member_id: haneul.id }),
+      planItem({ kind: "income", amount: 3_000_000, member_id: bada.id }),
+      planItem({ kind: "contribution", amount: 1_500_000, member_id: bada.id }),
+      // 바다: 300 − 150 − 200 = −50 (수입보다 50만 원 많이 배분)
+      planItem({ kind: "saving", amount: 2_000_000, member_id: bada.id }),
+      planItem({ kind: "expense", amount: 1_800_000, name: "공동생활비" }),
+    ],
+    liabilities: [parentsLoan],
+    liabilityBalances: { [parentsLoan.id]: 30_000_000 },
+  });
+  const h = plan.members.find((m) => m.memberId === haneul.id)!;
+  const b = plan.members.find((m) => m.memberId === bada.id)!;
+
+  it("사용 가능 금액은 음수 그대로 보여 준다 (초과 배분 경고의 근거)", () => {
+    // 하늘: 400 − 통신비 10 − 이자 30 − 납입 200 = 160
+    expect(h.allowance).toBe(1_600_000);
+    expect(b.allowance).toBe(-500_000);
+  });
+
+  it("계획 소비에는 음수인 사용 가능 금액을 0으로 넣는다", () => {
+    // 개인 고정지출 10 + 이자 30 + 사용 가능 금액(160 + 0) + 공동지출 180 = 380
+    expect(plan.totals.consumption).toBe(3_800_000);
+    expect(plan.totals.principalRepayment).toBe(0);
+  });
+
+  it("계획 저축 = 수입 − 계획 소비 − 계획 원금상환: 초과 배분한 만큼만 줄어든다", () => {
+    // 700 − 380 − 0 = 320 (= 바다 저축 200 + 공동저축 170 − 초과 배분 50)
+    expect(plan.totals.savings).toBe(3_200_000);
+    expect(plan.joint.surplus).toBe(1_700_000);
+  });
+
+  it("주머니별 계획 소비도 음수가 되지 않는다", () => {
+    expect(plannedMemberConsumption(b)).toBe(0);
+    // 통신비 10 + 이자 30 + 사용 가능 금액 160
+    expect(plannedMemberConsumption(h)).toBe(2_000_000);
+    expect(plannedJointConsumption(plan.joint)).toBe(1_800_000);
+  });
+});
+
+describe("계획의 부채 줄 (6절·7절)", () => {
+  const haneul = member("하늘");
+  const mortgage = liability({
+    kind: "equal_principal",
+    name: "주택담보대출",
+    original_principal: 60_000_000,
+    annual_rate: 6,
+    term_months: 120,
+    start_month: "2026-01",
+    payment_day: 25,
+  });
+  const lines = (liabilityBalances: Record<string, number>, month = "2026-03", liabilities = [mortgage]) =>
+    buildPlanLines({ month, planItems: [], liabilities, liabilityBalances });
+
+  it("월초 잔액 기록이 없으면 최초 원금을 기준으로 계산한다", () => {
+    // 원금 6,000만 ÷ 120 = 50만, 이자 6,000만 × 6% ÷ 12 = 30만
+    expect(lines({})).toEqual([
+      {
+        key: `liability:${mortgage.id}`,
+        kind: "debt",
+        pocket: JOINT,
+        name: "주택담보대출",
+        amount: 800_000,
+        principal: 500_000,
+        interest: 300_000,
+        liabilityId: mortgage.id,
+        payDay: 25,
+      },
+    ]);
+  });
+
+  it("월초 잔액 기록이 있으면 그 잔액으로 이자를 계산한다", () => {
+    // 이자 3,000만 × 6% ÷ 12 = 15만
+    expect(lines({ [mortgage.id]: 30_000_000 })[0]).toMatchObject({ amount: 650_000, principal: 500_000, interest: 150_000 });
+  });
+
+  it("첫 납부 월 전에는 줄이 없고, 첫 납부 월부터 생긴다", () => {
+    const later = { ...mortgage, start_month: "2026-04" };
+    expect(lines({ [mortgage.id]: 60_000_000 }, "2026-03", [later])).toEqual([]);
+    expect(lines({}, "2026-03", [later])).toEqual([]);
+    expect(lines({ [mortgage.id]: 60_000_000 }, "2026-04", [later])).toHaveLength(1);
+  });
+
+  it("월초 잔액이 0(완납)이면 보관하지 않았어도 줄이 없다", () => {
+    expect(lines({ [mortgage.id]: 0 })).toEqual([]);
+  });
+
+  it("납부액이 0원인 차용금(월 지급액 0)은 줄을 만들지 않는다", () => {
+    const free = liability({ kind: "interest_only", original_principal: 10_000_000, monthly_payment: 0, payer_member_id: haneul.id });
+    expect(lines({ [free.id]: 10_000_000 }, "2026-03", [free])).toEqual([]);
+  });
+
+  it("개인이 내는 부채 줄은 그 구성원 주머니에, 원금·이자가 나뉘어 잡힌다", () => {
+    const carLoan = liability({
+      kind: "amortized",
+      name: "자동차 대출",
+      payer_member_id: haneul.id,
+      original_principal: 10_000_000,
+      annual_rate: 12,
+      term_months: 12,
+      start_month: "2026-03",
+    });
+    const plan = buildMonthPlan({
+      month: "2026-03",
+      members: [haneul],
+      planItems: [planItem({ kind: "income", amount: 3_000_000, member_id: haneul.id })],
+      liabilities: [carLoan],
+      liabilityBalances: {},
+    });
+    const h = plan.members[0];
+    // 월 납부액 888,488 (1,000만·연 12%·12개월), 첫 달 이자 10만
+    expect(h.debtInterest).toBe(100_000);
+    expect(h.debtPrincipal).toBe(788_488);
+    expect(h.allowance).toBe(3_000_000 - 888_488);
+    expect(plan.totals.consumption).toBe(100_000 + (3_000_000 - 888_488));
+    expect(plan.totals.principalRepayment).toBe(788_488);
+    expect(plan.totals.savings).toBe(0);
+  });
+
+  it("계획 줄은 정렬 순서(같으면 만든 순서)대로, 부채 줄은 그 뒤에 온다", () => {
+    const first = planItem({ kind: "expense", amount: 1, name: "첫째", sort_order: 1, created_at: "2026-01-01T00:00:00Z" });
+    const second = planItem({ kind: "expense", amount: 2, name: "둘째", sort_order: 1, created_at: "2026-01-02T00:00:00Z" });
+    const third = planItem({ kind: "income", amount: 3, name: "셋째", sort_order: 2, created_at: "2025-01-01T00:00:00Z" });
+    const result = buildPlanLines({ month: "2026-03", planItems: [third, second, first], liabilities: [mortgage], liabilityBalances: {} });
+    expect(result.map((line) => line.name)).toEqual(["첫째", "둘째", "셋째", "주택담보대출"]);
+  });
+});
+
+describe("계획 항목의 적용 기간: 경계", () => {
+  it("시작 월과 종료 월이 같으면 그 달에만 적용된다", () => {
+    const once = planItem({ kind: "expense", amount: 500_000, start_month: "2026-12", end_month: "2026-12" });
+    expect(isPlanItemActive(once, "2026-11")).toBe(false);
+    expect(isPlanItemActive(once, "2026-12")).toBe(true);
+    expect(isPlanItemActive(once, "2027-01")).toBe(false);
+  });
+
+  it("특정 월 반복은 해가 바뀌어도 같은 달에 적용되고, 기간 조건과 함께 본다", () => {
+    const bonus = planItem({ kind: "income", amount: 2_000_000, income_type: "bonus", months_of_year: [1, 12], start_month: "2026-12" });
+    expect(isPlanItemActive(bonus, "2026-01")).toBe(false); // 시작 전
+    expect(isPlanItemActive(bonus, "2026-12")).toBe(true);
+    expect(isPlanItemActive(bonus, "2027-01")).toBe(true);
+    expect(isPlanItemActive(bonus, "2027-02")).toBe(false);
+  });
+
+  it("상여금 달에는 그 금액이 수입과 사용 가능 금액에 더해진다", () => {
+    const haneul = member("하늘");
+    const items = [
+      planItem({ kind: "income", amount: 4_000_000, member_id: haneul.id }),
+      planItem({ kind: "income", amount: 2_000_000, member_id: haneul.id, income_type: "bonus", months_of_year: [7] }),
+      planItem({ kind: "contribution", amount: 2_500_000, member_id: haneul.id }),
+    ];
+    const at = (month: string) => buildMonthPlan({ month, members: [haneul], planItems: items, liabilities: [], liabilityBalances: {} });
+    expect(at("2026-06").members[0]).toMatchObject({ income: 4_000_000, allowance: 1_500_000 });
+    expect(at("2026-07").members[0]).toMatchObject({ income: 6_000_000, allowance: 3_500_000 });
+    // 계획 저축은 그대로다: 상여금은 따로 저축 항목으로 등록하지 않으면 쓰는 돈으로 본다
+    expect(at("2026-06").totals.savings).toBe(2_500_000);
+    expect(at("2026-07").totals.savings).toBe(2_500_000);
   });
 });
