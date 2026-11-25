@@ -25,7 +25,7 @@ const LIQUIDITY_OPTIONS = (["liquid", "short", "locked"] as const).map((value) =
   label: { liquid: "즉시 사용", short: "현금화 가능", locked: "장기" }[value],
 }));
 
-type Errors = Partial<Record<"name" | "value" | "principal", string>>;
+type Errors = Partial<Record<"name" | "value" | "principal" | "contributed", string>>;
 
 /** 자산 추가(asset 없음) · 정보 수정(asset 있음). 금액 수정은 AssetValueDialog 에서 한다. */
 export function AssetFormDialog({
@@ -52,10 +52,13 @@ export function AssetFormDialog({
   const [value, setValue] = useState<Won | null>(null);
   const [principal, setPrincipal] = useState<Won | null>(null);
   const [existedBefore, setExistedBefore] = useState(true);
+  const [contributed, setContributed] = useState<Won | null>(null);
   const [errors, setErrors] = useState<Errors>({});
   const [saving, setSaving] = useState(false);
 
   const valuation = ASSET_KINDS[kind].tracking === "valuation";
+  /** 기준 월이 아니고 "전부터 갖고 있던 자산"일 때만 이번 달에 넣은 돈을 받는다 */
+  const asksContribution = !editing && !isBaseline && existedBefore;
   const ownerOptions = [
     ...data.members.map((member) => ({ value: member.id, label: member.name })),
     { value: JOINT, label: "공동" },
@@ -71,6 +74,9 @@ export function AssetFormDialog({
     if (!name.trim()) next.name = "이름을 입력해 주세요.";
     if (!editing && value === null) next.value = "현재 평가금액을 입력해 주세요.";
     if (!editing && valuation && principal === null) next.principal = "지금까지 넣은 돈을 입력해 주세요.";
+    if (asksContribution && contributed !== null && value !== null && contributed > value) {
+      next.contributed = `${valuation ? "현재 평가금액" : "현재 잔액"}보다 클 수 없습니다.`;
+    }
     setErrors(next);
     if (Object.keys(next).length > 0 || !latest) return;
 
@@ -93,6 +99,7 @@ export function AssetFormDialog({
               value: value!,
               principal: valuation ? principal! : value!,
               existedBefore: !isBaseline && existedBefore,
+              contributedThisMonth: asksContribution ? (contributed ?? 0) : 0,
             }),
           { success: "자산을 추가했습니다" },
         );
@@ -196,12 +203,23 @@ export function AssetFormDialog({
               <Label htmlFor="asset-existed-before">{existedBefore ? "전부터 갖고 있던 자산" : "이번 달에 새로 생긴 자산"}</Label>
               <p className="text-caption text-muted-foreground">
                 {existedBefore
-                  ? "이번 달 저축·소비 계산에 영향을 주지 않습니다."
+                  ? "이번 달에 넣은 돈만 저축에 반영하고, 나머지는 저축·소비 계산에 넣지 않습니다."
                   : "이번 달에 넣은 돈으로 보고 저축에 반영합니다."}
               </p>
             </div>
             <Switch id="asset-existed-before" checked={existedBefore} onCheckedChange={setExistedBefore} className="mt-0.5" />
           </div>
+        )}
+
+        {asksContribution && (
+          <FormField
+            label="이번 달에 이 자산에 넣은 돈"
+            optional
+            error={errors.contributed}
+            description="이번 달 적금 납입·추가 매수처럼 다른 통장에서 이 자산으로 옮긴 돈. 비우면 0원으로 봅니다."
+          >
+            {(control) => <MoneyInput {...control} value={contributed} onChange={setContributed} />}
+          </FormField>
         )}
       </div>
     </ResponsiveDialog>

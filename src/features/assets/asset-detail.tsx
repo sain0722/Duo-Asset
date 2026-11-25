@@ -17,6 +17,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator";
 import { currentPosition, goalsView, history, pocketName, pocketTone } from "@/lib/data/derive";
 import { useHousehold } from "@/lib/data/hooks";
+import type { HouseholdData } from "@/lib/data/types";
 import { ASSET_KINDS, LIQUIDITY_LABELS, pocketOf } from "@/lib/finance/meta";
 import { formatDate, formatMonthOnly, formatPercent, formatYm, formatYmShort } from "@/lib/format";
 import { currentYm, todayInSeoul } from "@/lib/month";
@@ -59,6 +60,7 @@ export function AssetDetail() {
   const pocket = pocketOf(asset.owner_member_id);
   const current = line ? valuationOf(line.value, line.principal) : null;
   const days = asset.maturity_date ? daysUntil(asset.maturity_date, todayInSeoul()) : null;
+  const valuedOn = latestValuedOn(data, asset.id);
 
   const goals = goalsView(data, currentYm())
     .progress.flatMap((progress) => {
@@ -100,6 +102,12 @@ export function AssetDetail() {
               sub={
                 <>
                   {position.asOf && <span>{formatYm(position.asOf)} 기준</span>}
+                  {valuedOn && (
+                    <>
+                      <span aria-hidden>·</span>
+                      <span className="tabular-nums">{formatDate(valuedOn)} 기준</span>
+                    </>
+                  )}
                   {line && !line.confirmed && <Badge variant="warning">이번 달 미확인 · 지난달 값</Badge>}
                 </>
               }
@@ -208,6 +216,18 @@ export function AssetDetail() {
       </div>
     </PageContainer>
   );
+}
+
+/**
+ * 지금 보이는 값을 담은 스냅샷의 평가 기준일. 없으면(그 달 말일 기준) null.
+ * 열린 달만 monthData 에 있으므로 값이 마감된 달의 것이면 표시하지 않는다.
+ */
+function latestValuedOn(data: HouseholdData, assetId: string): string | null {
+  for (const month of data.months.toReversed()) {
+    const snapshot = data.monthData[month.id]?.assetSnapshots.find((s) => s.asset_id === assetId);
+    if (snapshot) return snapshot.valued_on;
+  }
+  return null;
 }
 
 function BackLink() {

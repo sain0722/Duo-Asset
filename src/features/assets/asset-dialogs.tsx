@@ -7,6 +7,7 @@ import { Delta, Money } from "@/components/money";
 import { MoneyInput } from "@/components/money-input";
 import { ResponsiveDialog } from "@/components/responsive-dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { latestMonth } from "@/lib/data/derive";
 import { useHousehold, useMutate } from "@/lib/data/hooks";
 import { saveAssetSnapshot, updateRow } from "@/lib/data/mutations";
@@ -14,6 +15,7 @@ import { EMPTY_MONTH_DATA } from "@/lib/data/types";
 import { ASSET_KINDS } from "@/lib/finance/meta";
 import type { Asset, AssetLine, Won } from "@/lib/finance/types";
 import { formatMonthOnly } from "@/lib/format";
+import { todayInSeoul } from "@/lib/month";
 
 import { disposalSnapshot } from "./derive";
 
@@ -58,22 +60,31 @@ export function AssetValueDialog({
   // 이번 달 값을 확인하지 않았다면 평가금액은 비워 둔다 (지난달 값을 조용히 확정하지 않기 위해)
   const [value, setValue] = useState<Won | null>(snapshot ? snapshot.value : null);
   const [principal, setPrincipal] = useState<Won | null>(snapshot?.principal ?? line?.principal ?? null);
-  const [errors, setErrors] = useState<{ value?: string; principal?: string }>({});
+  const [valuedOn, setValuedOn] = useState(snapshot?.valued_on ?? "");
+  const [errors, setErrors] = useState<{ value?: string; principal?: string; valuedOn?: string }>({});
   const [saving, setSaving] = useState(false);
 
   if (!latest) return null;
   const monthLabel = formatMonthOnly(latest.month);
+  const today = todayInSeoul();
 
   async function submit() {
     const next: typeof errors = {};
     if (value === null) next.value = "금액을 입력해 주세요.";
     if (valuation && principal === null) next.principal = "순투입액을 입력해 주세요.";
+    // 'YYYY-MM-DD' 는 문자열 비교로 날짜 순서가 맞다
+    if (valuation && valuedOn && valuedOn > today) next.valuedOn = "오늘 이후 날짜는 고를 수 없습니다.";
     setErrors(next);
     if (Object.keys(next).length > 0) return;
 
     setSaving(true);
     const result = await mutate(
-      () => saveAssetSnapshot(latest!.id, asset.id, snapshot, { value: value!, principal: valuation ? principal! : value! }),
+      () =>
+        saveAssetSnapshot(latest!.id, asset.id, snapshot, {
+          value: value!,
+          principal: valuation ? principal! : value!,
+          ...(valuation ? { valued_on: valuedOn || null } : {}),
+        }),
       { success: `${monthLabel} 값을 저장했습니다` },
     );
     setSaving(false);
@@ -114,6 +125,18 @@ export function AssetValueDialog({
             description="이번 달에 더 넣었으면 더하고, 뺀 돈이 있으면 그만큼 줄여 주세요."
           >
             {(control) => <MoneyInput {...control} value={principal} onChange={setPrincipal} allowNegative />}
+          </FormField>
+        )}
+        {valuation && (
+          <FormField
+            label="평가 기준일"
+            optional
+            error={errors.valuedOn}
+            description="퇴직연금 분기 명세서처럼 월말 값이 아닐 때만 적어 주세요. 비우면 그 달 말일 기준입니다."
+          >
+            {(control) => (
+              <Input {...control} type="date" value={valuedOn} max={today} onChange={(e) => setValuedOn(e.target.value)} />
+            )}
           </FormField>
         )}
       </div>
