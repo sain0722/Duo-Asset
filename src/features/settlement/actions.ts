@@ -1,21 +1,28 @@
 /**
  * 정산 화면의 저장 동작. 항상 이 달의 최신 입력 행(version 포함)을 찾아 넘긴다.
- * 여러 건을 한 번에 확인할 때는 Promise.all 로 묶어 한 번의 mutate(재조회 1회) 안에서 부른다.
+ * 여러 건을 한 번에 확인할 때는 saveInputs(테이블마다 요청 1회)를 한 번의 mutate(재조회 1회) 안에서 부른다.
  */
 import {
   clearSnapshotOrEntry,
   saveAssetSnapshot,
   saveEntry,
   saveLiabilitySnapshot,
+  saveMonthInputs,
   type AssetSnapshotValues,
   type LiabilitySnapshotValues,
 } from "@/lib/data/mutations";
 import { memberIdOf } from "@/lib/finance";
 import type { AmountLine, AssetLine, LiabilityLine, Won } from "@/lib/finance/types";
 
+import type { MonthInputs } from "./model";
 import type { OpenMonthContext } from "./month-context";
 
 type Ctx = Pick<OpenMonthContext, "month" | "own" | "report">;
+
+/** 아직 행이 없는(미확인) 항목 여러 건을 테이블마다 한 번의 요청으로 기록한다 */
+export function saveInputs(ctx: Ctx, inputs: Partial<MonthInputs>) {
+  return saveMonthInputs(ctx.month.id, inputs);
+}
 
 /** 계획 줄(또는 추가 항목)의 실제 금액을 기록한다 */
 export function saveAmountLine(ctx: Ctx, kind: "income" | "contribution" | "expense", line: AmountLine, amount: Won) {

@@ -15,7 +15,7 @@ import type { AssetLine, PocketId, Won } from "@/lib/finance/types";
 import { JOINT } from "@/lib/finance/types";
 import { formatCompactWon } from "@/lib/format";
 
-import { clearAssetLine, hasOpeningValues, saveAssetLine } from "./actions";
+import { clearAssetLine, hasOpeningValues, saveAssetLine, saveInputs } from "./actions";
 import { assetValueChange, balanceWithPlannedSaving, plannedSavingsByAsset, principalAfter, progressOf, rowIdOf } from "./model";
 import { useOpenMonth } from "./month-context";
 import { ConfirmedValue, EditGroup, InputWithQuick, PendingMark, QuickButton, Row, RowActions, RowHead } from "./rows";
@@ -39,7 +39,10 @@ export function AssetSection({ open, onOpenChange, step }: { open: boolean; onOp
   function keepAll() {
     void save(
       unconfirmed.map((line) => `asset:${line.assetId}`),
-      () => Promise.all(unconfirmed.map((line) => saveAssetLine(ctx, line, { value: line.openValue, principal: line.openPrincipal }))),
+      () =>
+        saveInputs(ctx, {
+          assetSnapshots: unconfirmed.map((line) => ({ asset_id: line.assetId, value: line.openValue, principal: line.openPrincipal })),
+        }),
     );
   }
 
@@ -51,7 +54,7 @@ export function AssetSection({ open, onOpenChange, step }: { open: boolean; onOp
       progress={progressOf(items, "assets")}
       open={open}
       onOpenChange={onOpenChange}
-      description={baseline ? "출발점이 되는 잔액입니다. 지금 계좌에 있는 금액을 적어 주세요." : "정산일 기준 잔액을 적습니다."}
+      description={baseline ? "출발점이 되는 잔액입니다. 지금 계좌에 있는 금액을 적어 주세요." : "그 달 말일 잔액을 적습니다."}
       action={
         !baseline &&
         unconfirmed.length > 1 && (

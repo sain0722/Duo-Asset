@@ -2,8 +2,9 @@
  * 월 정산 화면이 쓰는 파생 값. 정산 결과(MonthReport)를 화면 단위로 다시 묶을 뿐 새 지표를 정의하지 않는다.
  * 순수 함수만 둔다 (React·Supabase import 금지).
  */
-import { percentOf } from "@/lib/finance";
-import type { AssetLine, LiabilityLine, MonthReport, PlanLine, PocketId, Won } from "@/lib/finance/types";
+import { memberIdOf, percentOf } from "@/lib/finance";
+import type { SuggestedInputs } from "@/lib/finance/suggest";
+import type { AmountLine, AssetLine, LiabilityLine, MonthReport, PlanLine, PocketId, Won } from "@/lib/finance/types";
 
 export type SectionId = "income" | "assets" | "liabilities" | "transfers" | "expenses";
 
@@ -143,4 +144,122 @@ export function pocketUsage(pocket: { consumption: Won; plannedConsumption: Won 
 /** 미확인 항목 경고는 확인 목록으로 따로 보여 주므로, 결과 영역에는 나머지 경고만 */
 export function resultWarnings(report: MonthReport) {
   return report.warnings.filter((warning) => !warning.code.startsWith("unconfirmed_"));
+}
+
+// ───────────────────────── 한 번에 확인 ─────────────────────────
+
+/** 확인 창에 보여 줄 한 줄 (무엇을 · 얼마로 · 왜) */
+export interface SuggestionRow {
+  /** 저장 중 표시에 쓰는 행 key (각 영역 행과 같다) */
+  pendingKey: string;
+  section: SectionId;
+  /** 화면의 행 id (CheckItem.rowId 와 같다) */
+  rowId: string;
+  name: string;
+  amount: Won;
+  /** 이자·지급액이 함께 기록되면 그 금액과 이름 */
+  extra: Won | null;
+  extraLabel: "이자" | "지급액" | null;
+  reason: "전월과 동일" | "전월 + 저축 계획" | "예정 상환" | "계획대로";
+}
+
+/** suggestInputs 결과를 확인 창의 줄로 바꾼다. 화면 순서(수입 → 자산 → 부채 → 납입)대로. */
+export function suggestionRows(suggested: SuggestedInputs, report: Pick<MonthReport, "liabilityLines">): SuggestionRow[] {
+  const income = suggested.entries.filter((entry) => entry.kind === "income");
+  const contributions = suggested.entries.filter((entry) => entry.kind === "contribution");
+  const entryRow = (entry: SuggestedInputs["entries"][number]): SuggestionRow => ({
+    pendingKey: `${entry.kind}:${entry.planItemId}`,
+    section: entry.kind === "income" ? "income" : "transfers",
+    rowId: rowIdOf(entry.kind, entry.planItemId),
+    name: entry.kind === "income" ? entry.name : `${entry.name} 입금`,
+    amount: entry.amount,
+    extra: null,
+    extraLabel: null,
+    reason: "계획대로",
+  });
+  return [
+    ...income.map(entryRow),
+    ...suggested.assets.map(
+      (asset): SuggestionRow => ({
+        pendingKey: `asset:${asset.assetId}`,
+        section: "assets",
+        rowId: rowIdOf("asset", asset.assetId),
+        name: asset.name,
+        amount: asset.value,
+        extra: null,
+        extraLabel: null,
+        reason: asset.reason === "planned_saving" ? "전월 + 저축 계획" : "전월과 동일",
+      }),
+    ),
+    ...suggested.liabilities.map((liability): SuggestionRow => {
+      const line = report.liabilityLines.find((l) => l.liabilityId === liability.liabilityId);
+      const unchanged = line !== undefined && line.openBalance === liability.balance && liability.interestPaid === null;
+      return {
+        pendingKey: `liability:${liability.liabilityId}`,
+        section: "liabilities",
+        rowId: rowIdOf("liability", liability.liabilityId),
+        name: liability.name,
+        amount: liability.balance,
+        extra: liability.interestPaid,
+        extraLabel: liability.interestPaid === null ? null : line?.kind === "interest_only" ? "지급액" : "이자",
+        reason: unchanged ? "전월과 동일" : "예정 상환",
+      };
+    }),
+    ...contributions.map(entryRow),
+  ];
+}
+
+/** 제안을 모두 확인하고 나면 남는 확인 항목 (통장·투자자산 등). 저장 뒤 이 중 첫 항목으로 이동한다. */
+export function remainingAfter(items: CheckItem[], rows: Pick<SuggestionRow, "rowId">[]): CheckItem[] {
+  const confirmed = new Set(rows.map((row) => row.rowId));
+  return items.filter((item) => !item.done && !confirmed.has(item.rowId));
+}
+
+/** saveMonthInputs 에 그대로 넘길 값. 아직 행이 없는(미확인) 항목만 들어 있다. */
+export interface MonthInputs {
+  assetSnapshots: { asset_id: string; value: Won; principal: Won }[];
+  liabilitySnapshots: { liability_id: string; balance: Won; interest_paid?: Won | null }[];
+  entries: {
+    kind: "income" | "contribution";
+    member_id: string | null;
+    plan_item_id: string | null;
+    name: string;
+    amount: Won;
+  }[];
+}
+
+/** 제안 목록 → 한 번에 저장할 값. 계획 항목 id 는 saveAmountLine 과 같이 planLines 에서 찾는다. */
+export function suggestionInputs(suggested: SuggestedInputs, report: Pick<MonthReport, "planLines">): MonthInputs {
+  return {
+    assetSnapshots: suggested.assets.map((asset) => ({ asset_id: asset.assetId, value: asset.value, principal: asset.principal })),
+    liabilitySnapshots: suggested.liabilities.map((liability) => ({
+      liability_id: liability.liabilityId,
+      balance: liability.balance,
+      ...(liability.interestPaid !== null ? { interest_paid: liability.interestPaid } : {}),
+    })),
+    entries: suggested.entries.map((entry) => ({
+      kind: entry.kind,
+      member_id: entry.memberId,
+      plan_item_id: report.planLines.find((plan) => plan.key === entry.planItemId)?.planItemId ?? null,
+      name: entry.name,
+      amount: entry.amount,
+    })),
+  };
+}
+
+/** 계획된 수입·납입 줄을 계획 금액대로 확인하는 값 ("모두 계획대로") */
+export function plannedEntryInputs(
+  kind: "income" | "contribution",
+  lines: Pick<AmountLine, "key" | "name" | "pocket" | "planned" | "actual">[],
+  planLines: Pick<PlanLine, "key" | "planItemId">[],
+): MonthInputs["entries"] {
+  return lines
+    .filter((line) => line.actual === null && line.planned !== null)
+    .map((line) => ({
+      kind,
+      member_id: memberIdOf(line.pocket),
+      plan_item_id: planLines.find((plan) => plan.key === line.key)?.planItemId ?? null,
+      name: line.name,
+      amount: line.planned!,
+    }));
 }

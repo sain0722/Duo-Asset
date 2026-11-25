@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { computeMonthReport } from "@/lib/finance";
+import { computeMonthReport, suggestInputs } from "@/lib/finance";
 import { actual, asset, assetSnap, liability, liabilitySnap, member, monthInput, planItem } from "@/lib/finance/testing";
 
 import {
@@ -8,13 +8,18 @@ import {
   balanceWithPlannedSaving,
   checklist,
   planComparison,
+  plannedEntryInputs,
   plannedSavingsByAsset,
   pocketUsage,
   principalAfter,
   progressOf,
+  remainingAfter,
   resultWarnings,
+  rowIdOf,
   savingsAchievement,
   scheduledBalance,
+  suggestionInputs,
+  suggestionRows,
 } from "./model";
 
 /* 금액은 모두 가상의 값이다. */
@@ -157,5 +162,76 @@ describe("결과", () => {
     // 수입 없이 잔액만 늘면 소비가 음수 → 경고
     expect(resultWarnings(report).map((w) => w.code)).toContain("negative_consumption");
     expect(resultWarnings(report).every((w) => !w.code.startsWith("unconfirmed_"))).toBe(true);
+  });
+});
+
+describe("예정대로 한 번에 확인", () => {
+  function report() {
+    const f = fixture();
+    const lease = asset({ kind: "lease_deposit", name: "보증금", owner_member_id: null });
+    const free = liability({ kind: "interest_only", name: "차용금", original_principal: 5_000_000, monthly_payment: 0, payer_member_id: f.b.id });
+    const r = computeMonthReport(
+      monthInput({
+        members: [f.a, f.b],
+        assets: [f.cash, f.savings, lease, f.stock],
+        liabilities: [f.loan, free],
+        planItems: [f.salary, f.contribution, f.saving],
+        prevAssets: [assetSnap(f.cash, 1_000_000), assetSnap(f.savings, 500_000), assetSnap(lease, 10_000_000), assetSnap(f.stock, 2_000_000)],
+        prevLiabilities: [liabilitySnap(f.loan, 600_000), liabilitySnap(free, 5_000_000)],
+      }),
+    );
+    return { f, lease, free, report: r };
+  }
+
+  it("확인 창의 줄: 이름·금액·근거를 화면 순서로", () => {
+    const { report: r } = report();
+    const rows = suggestionRows(suggestInputs(r), r);
+    expect(rows.map((row) => [row.section, row.amount, row.reason])).toEqual([
+      ["income", 3_000_000, "계획대로"],
+      ["assets", 700_000, "전월 + 저축 계획"],
+      ["assets", 10_000_000, "전월과 동일"],
+      ["liabilities", 500_000, "예정 상환"],
+      ["liabilities", 5_000_000, "전월과 동일"],
+      ["transfers", 1_000_000, "계획대로"],
+    ]);
+    // 통장·투자자산은 직접 확인해야 하므로 들어 있지 않다
+    expect(rows.some((row) => row.section === "assets" && row.amount === 1_000_000)).toBe(false);
+    expect(rows.at(-1)!.name).toMatch(/입금$/);
+  });
+
+  it("한 번에 확인한 뒤 남는 항목은 통장·투자자산처럼 직접 볼 것뿐이다", () => {
+    const { f, report: r } = report();
+    const rows = suggestionRows(suggestInputs(r), r);
+    const items = checklist(r);
+    // 제안의 행 id 는 확인 목록의 행 id 와 같다
+    expect(rows.every((row) => items.some((item) => item.rowId === row.rowId))).toBe(true);
+    const left = remainingAfter(items, rows);
+    expect(left.map((item) => item.rowId)).toEqual([rowIdOf("asset", f.cash.id), rowIdOf("asset", f.stock.id)]);
+  });
+
+  it("저장할 값: 테이블별로 묶고 계획 항목 id 를 연결한다", () => {
+    const { f, report: r } = report();
+    const inputs = suggestionInputs(suggestInputs(r), r);
+    expect(inputs.assetSnapshots).toEqual([
+      { asset_id: f.savings.id, value: 700_000, principal: 700_000 },
+      expect.objectContaining({ value: 10_000_000 }),
+    ]);
+    // 예정 이자가 없으면 이자를 기록하지 않는다
+    expect(inputs.liabilitySnapshots.every((row) => !("interest_paid" in row))).toBe(true);
+    expect(inputs.entries).toEqual([
+      { kind: "income", member_id: f.a.id, plan_item_id: f.salary.id, name: f.salary.name, amount: 3_000_000 },
+      { kind: "contribution", member_id: f.a.id, plan_item_id: f.contribution.id, name: f.contribution.name, amount: 1_000_000 },
+    ]);
+  });
+
+  it("모두 계획대로: 아직 확인하지 않은 계획 줄만", () => {
+    const f = fixture();
+    const bonus = planItem({ kind: "income", amount: 500_000, member_id: f.b.id });
+    const r = computeMonthReport(
+      monthInput({ members: [f.a, f.b], planItems: [f.salary, bonus], entries: [actual(f.salary, 2_900_000)] }),
+    );
+    expect(plannedEntryInputs("income", r.incomeLines, r.planLines)).toEqual([
+      { kind: "income", member_id: f.b.id, plan_item_id: bonus.id, name: bonus.name, amount: 500_000 },
+    ]);
   });
 });

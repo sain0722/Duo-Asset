@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, Check } from "lucide-react";
+import { ArrowDown, CalendarClock, Check } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -12,7 +12,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { canClose, workingMonth } from "@/lib/data/derive";
 import { closeMonth } from "@/lib/data/mutations";
 import { EMPTY_MONTH_DATA, type HouseholdData } from "@/lib/data/types";
-import { percentOf } from "@/lib/finance";
+import { percentOf, suggestInputs } from "@/lib/finance";
 import type { MonthReport, MonthRow, Ym } from "@/lib/finance/types";
 import { JOINT } from "@/lib/finance/types";
 import { formatMonthOnly } from "@/lib/format";
@@ -20,10 +20,11 @@ import { addMonths, compareYm, currentYm } from "@/lib/month";
 import { cn } from "@/lib/utils";
 
 import { AssetSection } from "./asset-section";
+import { BulkConfirm } from "./bulk-confirm";
 import { ExpenseSection } from "./expense-section";
 import { IncomeSection } from "./income-section";
 import { LiabilitySection } from "./liability-section";
-import { checklist, progressOf, type CheckItem, type SectionId } from "./model";
+import { checklist, progressOf, remainingAfter, suggestionRows, type CheckItem, type SectionId } from "./model";
 import { OpenMonthProvider, type OpenMonthContext } from "./month-context";
 import { ResultBody } from "./result-panel";
 import { SaveIndicator, SaverProvider, useSaver } from "./save-status";
@@ -52,6 +53,9 @@ function OpenMonthInner({
   const isDesktop = useMediaQuery("(min-width: 64rem)");
   const items = useMemo(() => checklist(report, [...data.members.map((member) => member.id), JOINT]), [report, data.members]);
   const remaining = items.filter((item) => !item.done);
+  // 한 번에 확인할 수 있는 것을 빼고 직접 봐야 하는 항목 (통장·투자자산 등)
+  const manual = useMemo(() => remainingAfter(items, suggestionRows(suggestInputs(report), report)), [items, report]);
+  const bulkAvailable = manual.length < remaining.length;
   const progress = progressOf(items);
   const closable = canClose(data, month);
   const blocker = closable ? null : workingMonth(data);
@@ -84,6 +88,11 @@ function OpenMonthInner({
     );
   }, []);
   const jumpToItem = (item: CheckItem) => jumpTo(item.section, item.rowId);
+  // 한 번에 확인한 뒤: 남은 미확인(통장·투자자산 등)으로, 없으면 결과로
+  const afterBulk = (next: CheckItem | undefined) => {
+    if (next) return jumpToItem(next);
+    requestAnimationFrame(() => document.getElementById("section-result")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
   const nextUnconfirmed = remaining.length > 0 ? () => jumpToItem(remaining[0]) : undefined;
 
   const ctx: OpenMonthContext = {
@@ -150,11 +159,31 @@ function OpenMonthInner({
               tone={remaining.length === 0 ? "brand" : "ink"}
               aria-label="정산 진행률"
             />
+            {!ended && (
+              <p className="flex gap-2 text-sm text-muted-foreground">
+                <CalendarClock aria-hidden className="mt-0.5 size-4 shrink-0" />
+                <span>
+                  <span className="font-medium text-foreground">{label}은 아직 끝나지 않은 달이에요.</span> 잔액은 그 달 말일 잔액이라{" "}
+                  {nextLabel} 1일부터 마감할 수 있어요. 입력은 미리 해 두세요.
+                </span>
+              </p>
+            )}
+            {!baseline && <BulkConfirm onDone={afterBulk} />}
             <div className="flex min-h-11 flex-wrap items-center justify-between gap-x-3 gap-y-2">
-              <p className="text-sm">
+              <p className="min-w-0 text-sm">
                 {remaining.length > 0 ? (
                   <>
                     남은 미확인 <span className="font-semibold tabular-nums">{remaining.length}건</span>
+                    {manual.length > 0 && (
+                      <span className="block text-muted-foreground">
+                        {bulkAvailable ? "직접 확인할 항목 · " : ""}
+                        {manual
+                          .slice(0, 3)
+                          .map((item) => item.label)
+                          .join(", ")}
+                        {manual.length > 3 && ` 외 ${manual.length - 3}건`}
+                      </span>
+                    )}
                   </>
                 ) : (
                   <span className="flex items-center gap-1.5 text-brand">

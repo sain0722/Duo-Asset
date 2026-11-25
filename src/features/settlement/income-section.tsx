@@ -8,9 +8,9 @@ import { Button } from "@/components/ui/button";
 import { pocketName, pocketTone } from "@/lib/data/derive";
 import type { AmountLine } from "@/lib/finance/types";
 
-import { clearAmountLine, saveAmountLine } from "./actions";
+import { clearAmountLine, saveAmountLine, saveInputs } from "./actions";
 import { EntryDialog } from "./entry-dialog";
-import { progressOf, rowIdOf } from "./model";
+import { plannedEntryInputs, progressOf, rowIdOf } from "./model";
 import { useOpenMonth } from "./month-context";
 import { AmountRow, ConfirmedValue, Row, RowHead } from "./rows";
 import { useSaver } from "./save-status";
@@ -31,7 +31,7 @@ export function IncomeSection({ open, onOpenChange }: { open: boolean; onOpenCha
   function confirmAll() {
     void save(
       unconfirmed.map((line) => `income:${line.key}`),
-      () => Promise.all(unconfirmed.map((line) => saveAmountLine(ctx, "income", line, line.planned!))),
+      () => saveInputs(ctx, { entries: plannedEntryInputs("income", unconfirmed, report.planLines) }),
     );
   }
 

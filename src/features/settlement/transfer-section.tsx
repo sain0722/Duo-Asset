@@ -8,9 +8,9 @@ import { PocketBadge } from "@/components/pocket-badge";
 import { Button } from "@/components/ui/button";
 import { pocketName, pocketTone } from "@/lib/data/derive";
 
-import { clearAmountLine, saveAmountLine } from "./actions";
+import { clearAmountLine, saveAmountLine, saveInputs } from "./actions";
 import { EntryDialog } from "./entry-dialog";
-import { progressOf, rowIdOf } from "./model";
+import { plannedEntryInputs, progressOf, rowIdOf } from "./model";
 import { useOpenMonth } from "./month-context";
 import { AmountRow } from "./rows";
 import { useSaver } from "./save-status";
@@ -28,7 +28,7 @@ export function TransferSection({ open, onOpenChange }: { open: boolean; onOpenC
   function confirmAll() {
     void save(
       unconfirmed.map((line) => `contribution:${line.key}`),
-      () => Promise.all(unconfirmed.map((line) => saveAmountLine(ctx, "contribution", line, line.planned!))),
+      () => saveInputs(ctx, { entries: plannedEntryInputs("contribution", unconfirmed, report.planLines) }),
     );
   }
 

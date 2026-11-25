@@ -14,7 +14,7 @@ import { LIABILITY_KINDS } from "@/lib/finance";
 import type { LiabilityLine, Won } from "@/lib/finance/types";
 import { formatNumber } from "@/lib/format";
 
-import { clearLiabilityLine, saveLiabilityLine } from "./actions";
+import { clearLiabilityLine, saveInputs, saveLiabilityLine } from "./actions";
 import { liabilityChange, progressOf, rowIdOf, scheduledBalance } from "./model";
 import { useOpenMonth } from "./month-context";
 import { ConfirmedValue, EditGroup, InputWithQuick, PendingMark, QuickButton, Row, RowActions, RowHead } from "./rows";
@@ -32,14 +32,13 @@ export function LiabilitySection({ open, onOpenChange, step }: { open: boolean; 
     void save(
       unconfirmed.map((line) => `liability:${line.liabilityId}`),
       () =>
-        Promise.all(
-          unconfirmed.map((line) =>
-            saveLiabilityLine(ctx, line, {
-              balance: scheduledBalance(line),
-              ...(hasInterest(line, ctx.data.liabilities) ? { interest_paid: line.plannedInterest } : {}),
-            }),
-          ),
-        ),
+        saveInputs(ctx, {
+          liabilitySnapshots: unconfirmed.map((line) => ({
+            liability_id: line.liabilityId,
+            balance: scheduledBalance(line),
+            ...(hasInterest(line, ctx.data.liabilities) ? { interest_paid: line.plannedInterest } : {}),
+          })),
+        }),
     );
   }
 
