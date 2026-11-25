@@ -153,6 +153,7 @@ function MoneyInput({
   }
 
   const amounts = quickAmounts === true ? DEFAULT_QUICK_AMOUNTS : quickAmounts || [];
+  const invalid = inputProps["aria-invalid"] === true || inputProps["aria-invalid"] === "true";
 
   return (
     <div data-slot="money-input" className={cn("w-full", className)}>
@@ -203,8 +204,17 @@ function MoneyInput({
         </span>
       </div>
 
-      {/* 값이 없어도 한 줄 높이를 유지해 입력 중 레이아웃이 흔들리지 않게 한다. */}
-      <p id={readingId} className="mt-1.5 min-h-5 pr-0.5 text-right text-caption leading-5 text-muted-foreground tabular-nums">
+      {/*
+        값이 없어도 한 줄 높이를 유지해 입력 중 레이아웃이 흔들리지 않게 한다.
+        단, 비어 있고 오류가 난 칸은 자리를 비우지 않는다 — 바로 아래에 붙는 오류 문구가 이 칸의 것임이 분명해야 한다.
+      */}
+      <p
+        id={readingId}
+        className={cn(
+          "pr-0.5 text-right text-caption leading-5 text-muted-foreground tabular-nums",
+          value == null && invalid ? "sr-only" : "mt-1.5 min-h-5",
+        )}
+      >
         {value == null ? "" : formatKoreanWon(value)}
       </p>
 

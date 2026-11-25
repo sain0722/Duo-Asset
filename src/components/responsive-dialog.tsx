@@ -39,6 +39,14 @@ function ResponsiveDialog({ open, onOpenChange, title, description, children, fo
         onSubmit={(event) => {
           event.preventDefault();
           onSubmit(event);
+          // 검증 오류가 시트 아래쪽(화면 밖)에 있으면 버튼이 반응하지 않는 것처럼 보인다. 첫 오류 칸으로 옮긴다.
+          const form = event.currentTarget;
+          requestAnimationFrame(() => {
+            const invalid = form.querySelector<HTMLElement>('[aria-invalid="true"]');
+            if (!invalid) return;
+            invalid.focus({ preventScroll: true });
+            invalid.scrollIntoView({ block: "center" });
+          });
         }}
       >
         {body}

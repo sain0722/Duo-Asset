@@ -21,6 +21,8 @@ import { formatCompactWon, formatWon, formatYm, formatYmShort } from "@/lib/form
 import { isYm } from "@/lib/month";
 import { cn } from "@/lib/utils";
 
+import { moneyAxis } from "./chart-axis";
+
 /*
  * Recharts 공용 래퍼.
  * - 색은 CSS 변수(--chart-1..6, --member-1 등)만 쓰므로 라이트/다크가 자동으로 바뀐다.
@@ -258,6 +260,16 @@ function MoneyChart<T extends object>({
   const rows = data as readonly Record<string, unknown>[];
   const lastIndex = rows.length - 1;
 
+  // 값이 모두 같을 때 같은 눈금 글자가 반복되지 않도록 범위를 정한다 (chart-axis.ts)
+  const fromZero = type === "bar" || stacked;
+  const yAxis = moneyAxis(
+    rows.flatMap((row) => {
+      const values = resolved.map((item) => row[item.key]).filter((value): value is number => typeof value === "number");
+      return stacked ? [values.reduce((total, value) => total + value, 0)] : values;
+    }),
+    fromZero,
+  );
+
   const activeDot = { r: 4, stroke: "var(--card)", strokeWidth: 2 };
 
   const common = {
@@ -271,7 +283,7 @@ function MoneyChart<T extends object>({
       {/* 선·영역은 양 끝 점과 눈금 글자가 잘리지 않도록 여유를 둔다. */}
       <XAxis {...chartXAxisProps} dataKey={xKey} padding={type === "bar" ? undefined : { left: 6, right: 18 }} />
       {/* 선·영역은 변화가 보이도록 값 범위에 맞추고, 막대·누적은 길이가 곧 크기이므로 0 에서 시작한다. */}
-      <YAxis {...chartMoneyYAxisProps} domain={type === "bar" || stacked ? [0, "auto"] : ["auto", "auto"]} />
+      <YAxis {...chartMoneyYAxisProps} {...yAxis} />
     </>
   );
   const tooltip = (cursor: React.ComponentProps<typeof Tooltip>["cursor"]) => (
@@ -402,6 +414,7 @@ export {
   MoneyChart,
   chartGridProps,
   chartMoneyYAxisProps,
+  moneyAxis,
   chartXAxisProps,
   formatAxisWon,
 };

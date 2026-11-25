@@ -144,7 +144,7 @@
   open={open}
   onOpenChange={setOpen}
   title="11월 잔액 입력"
-  description="정산일 기준 잔액을 적어 주세요."
+  description="그 달 말일 잔액을 적어 주세요."
   onSubmit={handleSubmit}
   footer={
     <>
@@ -166,12 +166,12 @@
 
 | 컴포넌트 | props | 메모 |
 |----------|-------|------|
-| `ResponsiveDialog` | `open` `onOpenChange` `title` `description?` `children` `footer?` `onSubmit?` | `onSubmit`을 주면 본문+하단을 `<form>`으로 감싼다(`preventDefault` 포함). 본문만 스크롤된다 |
+| `ResponsiveDialog` | `open` `onOpenChange` `title` `description?` `children` `footer?` `onSubmit?` | `onSubmit`을 주면 본문+하단을 `<form>`으로 감싼다(`preventDefault` 포함). 본문만 스크롤된다. 제출 뒤 `aria-invalid`인 칸이 있으면 첫 칸으로 포커스와 스크롤을 옮긴다(오류는 `FormField`의 `error`로 표시하면 된다) |
 | `FormField` | `label` `description?` `error?` `optional?` `labelAside?` `children` | `children`을 함수로 주면 `{ id, aria-describedby, aria-invalid }`를 받아 컨트롤에 펼친다. 여러 요소로 된 컨트롤은 두 번째 인자의 `labelId`를 `aria-labelledby`로 |
 | `MoneyInput` | `value: number \| null` `onChange(v: number \| null)` `allowNegative?` `placeholder?` `quickAmounts?: boolean \| number[]` `disabled?` `id?` `aria-*` | 천 단위 쉼표, 우측 "원", 아래에 한국어 읽기("480만 원"). **빈 값은 `null`이며 0과 다르다.** `quickAmounts`는 +1만·+10만·+100만 칩. `allowNegative`면 ± 버튼이 생긴다 |
 | `Input` · `Textarea` (`ui/`) | 기본 HTML 속성 | 높이 48px, 글자 16px |
 | `NativeSelect` (`ui/native-select`) | `<select>` 속성, 자식은 `<option>` | 모바일에서 OS 선택기가 뜬다. 선택지가 5개 이상일 때 |
-| `SegmentedControl` (`ui/segmented-control`) | `value` `onValueChange` `options: {value, label}[]` `fullWidth?` `size?: "sm" \| "default"` `aria-label` | 2~4개 중 하나. 보기 전환·기간·소유자 |
+| `SegmentedControl` (`ui/segmented-control`) | `value` `onValueChange` `options: {value, label}[]` `fullWidth?` `size?: "sm" \| "default"` `aria-label` | 2~4개 중 하나. 보기 전환·기간·소유자. 라벨이 길면 칸 안에서 말줄임된다 |
 | `Switch` · `Checkbox` · `Slider` (`ui/`) | Radix 속성 | 켜고 끄기 / 여러 개 선택 / 비율·이율. `Label htmlFor`로 연결한다. `Slider`는 `aria-label(ledby)` 필수 |
 | `Label` (`ui/label`) | — | `FormField` 밖에서 컨트롤에 이름을 붙일 때 |
 
@@ -242,7 +242,7 @@
 | `height` | px, 기본 240 (축 눈금 포함) |
 | 값이 `null` | 미확인. 선이 끊기고 툴팁에 "미확인"으로 나온다 |
 
-기본으로 들어 있는 것: 금액 축(만·억 단위, `formatAxisWon`), 가로 실선 격자, 툴팁(그 지점의 모든 계열, 값 강조), 계열이 2개 이상이면 범례, 스크린 리더용 표, 라이트/다크 대응(CSS 변수).
+기본으로 들어 있는 것: 금액 축(만·억 단위, `formatAxisWon`. 값이 모두 같거나 거의 같아도 눈금 글자가 겹치지 않게 범위를 넓힌다 — `moneyAxis`), 가로 실선 격자, 툴팁(그 지점의 모든 계열, 값 강조), 계열이 2개 이상이면 범례, 스크린 리더용 표, 라이트/다크 대응(CSS 변수).
 
 규칙
 

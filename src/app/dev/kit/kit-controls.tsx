@@ -334,7 +334,7 @@ export function KitControls() {
         open={formOpen}
         onOpenChange={setFormOpen}
         title="11월 잔액 입력"
-        description="정산일 기준 계좌 잔액을 적어 주세요."
+        description="그 달 말일 계좌 잔액을 적어 주세요."
         onSubmit={() => {
           setFormOpen(false);
           toast("잔액을 저장했습니다");

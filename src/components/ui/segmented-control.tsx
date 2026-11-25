@@ -39,7 +39,7 @@ function SegmentedControl<T extends string>({
       onValueChange={(next) => onValueChange(next as T)}
       disabled={disabled}
       className={cn(
-        "inline-grid auto-cols-fr grid-flow-col items-center gap-0.5 rounded-xl bg-secondary p-1",
+        "inline-grid max-w-full auto-cols-[minmax(0,1fr)] grid-flow-col items-center gap-0.5 rounded-xl bg-secondary p-1",
         fullWidth && "grid w-full",
         disabled && "opacity-50",
         className,
@@ -52,7 +52,7 @@ function SegmentedControl<T extends string>({
           value={option.value}
           disabled={option.disabled}
           className={cn(
-            "relative inline-flex items-center justify-center rounded-lg px-3.5 font-semibold whitespace-nowrap text-muted-foreground",
+            "relative inline-flex min-w-0 items-center justify-center rounded-lg px-3.5 font-semibold whitespace-nowrap text-muted-foreground",
             "transition-colors outline-none hover:text-foreground",
             "focus-visible:ring-[3px] focus-visible:ring-ring/40",
             "disabled:pointer-events-none disabled:opacity-45",
@@ -63,7 +63,8 @@ function SegmentedControl<T extends string>({
             size === "default" ? "h-9 text-sm after:-inset-y-1" : "h-7 px-3 text-caption after:-inset-y-2",
           )}
         >
-          {option.label}
+          {/* 이름이 길면 옆 칸과 겹치지 않게 줄인다 */}
+          <span className="truncate">{option.label}</span>
         </RadioGroupPrimitive.Item>
       ))}
     </RadioGroupPrimitive.Root>
