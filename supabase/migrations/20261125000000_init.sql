@@ -556,7 +556,8 @@ grant update (balance, interest_paid, opening_balance, version)
   on public.liability_snapshots to authenticated;
 
 grant select, insert, delete on public.month_entries to authenticated;
-grant update (member_id, to_member_id, name, amount, memo, version)
+-- plan_item_id: 계획 항목을 "○월부터 변경"으로 나눌 때 이미 확인한 실제 값을 새 항목에 다시 연결하기 위해 허용한다
+grant update (member_id, to_member_id, plan_item_id, name, amount, memo, version)
   on public.month_entries to authenticated;
 
 -- ───────────────────────── RPC ─────────────────────────

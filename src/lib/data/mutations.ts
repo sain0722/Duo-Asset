@@ -166,6 +166,17 @@ export async function saveEntry(
   return insertOnce<MonthEntry>("month_entries", { month_id: monthId, ...values });
 }
 
+/**
+ * 이미 확인한 실제 값을 다른 계획 항목에 다시 연결한다.
+ * 계획 항목을 "○월부터 변경"으로 나누면 그 달의 계획 줄은 새 항목이 되는데, 실제 값이 옛 항목을
+ * 가리킨 채로 남으면 "계획에 없던 항목"으로 떨어져 같은 수입·지출이 두 번 잡힐 수 있다.
+ */
+export async function relinkEntries(entries: MonthEntry[], planItemId: string): Promise<void> {
+  for (const entry of entries) {
+    await updateRow<MonthEntry>("month_entries", entry, { plan_item_id: planItemId });
+  }
+}
+
 /** 확인을 취소한다 (다시 "미확인" 상태로) */
 export async function clearSnapshotOrEntry(
   table: "asset_snapshots" | "liability_snapshots" | "month_entries",

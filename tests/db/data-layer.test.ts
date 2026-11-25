@@ -12,6 +12,7 @@ import {
   createAssetWithSnapshot,
   deleteRow,
   insertRow,
+  relinkEntries,
   reopenMonth,
   restoreBackup,
   saveAssetSnapshot,
@@ -25,7 +26,8 @@ import { setSupabaseClient } from "@/lib/data/supabase";
 import type { HouseholdData } from "@/lib/data/types";
 import { memberIdOf } from "@/lib/finance/meta";
 import { suggestInputs } from "@/lib/finance/suggest";
-import { currentYm } from "@/lib/month";
+import { isPlanItemActive } from "@/lib/finance/plan";
+import { addMonths, currentYm } from "@/lib/month";
 import type { Asset, Goal, PlanItem } from "@/lib/finance/types";
 import { adminClient, anonClient } from "./helpers";
 
@@ -370,6 +372,49 @@ describe("계획 항목 삭제 제한", () => {
 
     const unused = await insertRow<PlanItem>("plan_items", { kind: "expense", name: "잘못 만든 항목", amount: 1, member_id: null });
     await expect(deleteRow("plan_items", unused.id)).resolves.toBeUndefined();
+  });
+});
+
+describe("계획 항목을 나눌 때 실제 값 재연결", () => {
+  it("이미 확인한 실제 값을 새 계획 항목에 다시 연결하면 수입이 두 번 잡히지 않는다", async () => {
+    let data = await loadAs(owner);
+    const open = workingMonth(data)!;
+    const salary = data.planItems.find((p) => p.kind === "income" && p.income_type === "salary" && isPlanItemActive(p, open.month))!;
+    // 이번 달 급여를 이미 확인해 둔 상태
+    const existing = data.monthData[open.id].entries.find((e) => e.plan_item_id === salary.id);
+    const confirmed = await saveEntry(open.id, existing, {
+      kind: "income",
+      member_id: salary.member_id,
+      plan_item_id: salary.id,
+      name: salary.name,
+      amount: salary.amount,
+    });
+    data = await loadAs(owner);
+    const incomeBefore = reportFor(data, workingMonth(data)!).income;
+
+    // "이번 달부터 금액 변경": 옛 항목을 전월로 끝내고 새 항목을 만든다
+    const ended = data.planItems.find((p) => p.id === salary.id)!;
+    await updateRow<PlanItem>("plan_items", ended, { end_month: addMonths(open.month, -1) });
+    const replacement = await insertRow<PlanItem>("plan_items", {
+      kind: "income",
+      income_type: "salary",
+      member_id: salary.member_id,
+      name: salary.name,
+      amount: salary.amount + 300_000,
+      start_month: open.month,
+    });
+
+    // 재연결하지 않으면: 새 계획 줄은 미확인(계획 금액으로 잠정 집계) + 옛 실제 값은 추가 항목 → 두 번 잡힌다
+    data = await loadAs(owner);
+    const doubled = reportFor(data, workingMonth(data)!);
+    expect(doubled.income).toBe(incomeBefore + salary.amount + 300_000);
+
+    await relinkEntries([data.monthData[open.id].entries.find((e) => e.id === confirmed.id)!], replacement.id);
+    data = await loadAs(owner);
+    const fixed = reportFor(data, workingMonth(data)!);
+    expect(fixed.income).toBe(incomeBefore);
+    const line = fixed.incomeLines.find((l) => l.key === replacement.id)!;
+    expect(line).toMatchObject({ planned: salary.amount + 300_000, actual: salary.amount });
   });
 });
 
