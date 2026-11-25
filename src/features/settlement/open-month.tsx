@@ -16,7 +16,7 @@ import { percentOf } from "@/lib/finance";
 import type { MonthReport, MonthRow, Ym } from "@/lib/finance/types";
 import { JOINT } from "@/lib/finance/types";
 import { formatMonthOnly } from "@/lib/format";
-import { addMonths, currentYm } from "@/lib/month";
+import { addMonths, compareYm, currentYm } from "@/lib/month";
 import { cn } from "@/lib/utils";
 
 import { AssetSection } from "./asset-section";
@@ -95,21 +95,29 @@ function OpenMonthInner({
     jumpTo,
   };
 
-  // 마감: (이번 달이 끝나기 전이면 한 번 더 경고) → 확인 → closeMonth
-  const [step, setStep] = useState<"early" | "confirm" | null>(null);
-  const early = month.month === currentYm();
+  // 스냅샷은 월말 잔액이므로 달이 끝난 뒤(다음 달 1일부터)에만 마감할 수 있다
+  const [confirming, setConfirming] = useState(false);
+  const ended = compareYm(month.month, currentYm()) < 0;
+  const canCloseNow = closable && report.complete && ended;
   const requestClose = () => {
-    if (closable && report.complete) setStep(early ? "early" : "confirm");
+    if (canCloseNow) setConfirming(true);
   };
   async function handleClose() {
     const ok = await save("close", () => closeMonth(month, report));
     if (!ok) throw new Error("마감하지 못했습니다");
+    // 기본 달(정산할 달)이 다음 달로 바뀌므로, 방금 마감한 결과를 계속 보여 주도록 달을 고정한다
+    onSelectMonth(month.month);
     const next = addMonths(month.month, 1);
     toast.success(`${label} 정산을 마감했습니다`, {
       action: { label: `${formatMonthOnly(next)} 정산하기`, onClick: () => onSelectMonth(next) },
     });
   }
-  const closeReason = !report.complete ? `미확인 ${remaining.length}건을 확인하면 마감할 수 있습니다.` : null;
+  const nextLabel = formatMonthOnly(addMonths(month.month, 1));
+  const closeReason = !report.complete
+    ? `미확인 ${remaining.length}건을 확인하면 마감할 수 있습니다.`
+    : !ended
+      ? `${label}이 끝난 뒤 ${nextLabel} 1일부터 마감할 수 있습니다. 입력은 미리 해 두세요.`
+      : null;
 
   return (
     <OpenMonthProvider value={ctx}>
@@ -151,7 +159,7 @@ function OpenMonthInner({
                 ) : (
                   <span className="flex items-center gap-1.5 text-brand">
                     <Check aria-hidden className="size-4" strokeWidth={2.5} />
-                    모두 확인했어요{closable ? ". 결과를 보고 마감하세요." : "."}
+                    모두 확인했어요{closable && ended ? ". 결과를 보고 마감하세요." : "."}
                   </span>
                 )}
               </p>
@@ -196,7 +204,7 @@ function OpenMonthInner({
           </CardContent>
           {closable && (
             <div className="hidden flex-col items-end gap-2 border-t px-6 pt-5 lg:flex">
-              <Button size="lg" disabled={!report.complete} onClick={requestClose}>
+              <Button size="lg" disabled={!canCloseNow} onClick={requestClose}>
                 {label} 마감
               </Button>
               <p className="text-caption text-muted-foreground">
@@ -213,6 +221,8 @@ function OpenMonthInner({
       <MobileCloseBar
         closable={closable}
         complete={report.complete}
+        ended={ended}
+        nextLabel={nextLabel}
         remaining={remaining.length}
         label={label}
         blocker={blocker?.month ?? null}
@@ -222,18 +232,10 @@ function OpenMonthInner({
       />
 
       <ConfirmDialog
-        open={step === "early"}
-        onOpenChange={(open) => !open && setStep((current) => (current === "early" ? null : current))}
-        title={`아직 ${label}이 끝나지 않았어요`}
-        description="월말 전에 마감하면 남은 기간의 입출금이 이 달 결과에 들어가지 않습니다. 정산일 기준 잔액을 적었다면 계속하세요."
-        confirmLabel="계속"
-        onConfirm={() => setStep("confirm")}
-      />
-      <ConfirmDialog
-        open={step === "confirm"}
-        onOpenChange={(open) => !open && setStep((current) => (current === "confirm" ? null : current))}
+        open={confirming}
+        onOpenChange={setConfirming}
         title={`${label} 정산을 마감할까요?`}
-        description={`이 달의 결과가 확정되고 ${formatMonthOnly(addMonths(month.month, 1))}이 열립니다. 가장 최근에 마감한 달은 다시 열어 고칠 수 있습니다.`}
+        description={`이 달의 결과가 확정되고 ${nextLabel}이 열립니다. 가장 최근에 마감한 달은 다시 열어 고칠 수 있습니다.`}
         confirmLabel="마감"
         onConfirm={handleClose}
       />
@@ -245,6 +247,8 @@ function OpenMonthInner({
 function MobileCloseBar({
   closable,
   complete,
+  ended,
+  nextLabel,
   remaining,
   label,
   blocker,
@@ -254,6 +258,8 @@ function MobileCloseBar({
 }: {
   closable: boolean;
   complete: boolean;
+  ended: boolean;
+  nextLabel: string;
   remaining: number;
   label: string;
   blocker: Ym | null;
@@ -267,6 +273,8 @@ function MobileCloseBar({
         <p className={cn("min-w-0 text-sm", !complete && "text-muted-foreground")}>
           {blocker && closable === false ? (
             <>{formatMonthOnly(blocker)}을 먼저 마감하세요</>
+          ) : complete && !ended ? (
+            <>{nextLabel} 1일부터 마감할 수 있어요</>
           ) : complete ? (
             <span className="font-medium text-brand">마감할 수 있어요</span>
           ) : (
@@ -282,7 +290,7 @@ function MobileCloseBar({
             </Button>
           )}
           {closable ? (
-            <Button size="sm" disabled={!complete} onClick={onClose}>
+            <Button size="sm" disabled={!complete || !ended} onClick={onClose}>
               {label} 마감
             </Button>
           ) : (

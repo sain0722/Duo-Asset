@@ -36,7 +36,7 @@ export function SectionCard({
   children: React.ReactNode;
 }) {
   const contentId = useId();
-  const done = progress && progress.done === progress.total;
+  const done = progress && progress.total > 0 && progress.done === progress.total;
 
   return (
     <Card id={id} className="scroll-mt-24 gap-0 py-0 sm:gap-0 sm:py-0 lg:scroll-mt-8">
