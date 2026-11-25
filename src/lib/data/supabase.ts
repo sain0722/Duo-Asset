@@ -14,3 +14,8 @@ export function getSupabase(): SupabaseClient {
   if (!client) client = createBrowserClient(SUPABASE_URL, SUPABASE_KEY);
   return client;
 }
+
+/** 테스트·스크립트 전용: 이미 로그인된 클라이언트를 주입한다. 앱 코드에서는 쓰지 않는다. */
+export function setSupabaseClient(next: SupabaseClient | undefined): void {
+  client = next;
+}
