@@ -30,6 +30,8 @@ const RPC_MESSAGES: Record<string, string> = {
   partner_email_same_as_mine: "배우자 이메일은 내 이메일과 달라야 합니다.",
   not_a_member: "가구 구성원이 아닙니다.",
   not_authenticated: "로그인이 필요합니다.",
+  invalid_backup: "DuoAsset 백업 파일이 아니거나 내용이 올바르지 않습니다.",
+  member_mismatch: "백업의 구성원 수가 현재 가구와 다릅니다.",
 };
 
 /** Supabase(PostgREST) 오류를 앱 오류로 바꾼다 */

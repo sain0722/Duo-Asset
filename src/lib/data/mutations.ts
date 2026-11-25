@@ -10,6 +10,7 @@ import type {
 } from "@/lib/finance/types";
 import { ConflictError, toAppError } from "./errors";
 import type { TableName } from "./queries";
+import type { BackupFile } from "./types";
 import { getSupabase } from "./supabase";
 
 /** DB 가 채우는 컬럼. 클라이언트는 보내지 않는다. */
@@ -209,4 +210,12 @@ export function closeMonth(month: MonthRow, report: MonthReport): Promise<MonthR
 
 export function reopenMonth(month: MonthRow): Promise<MonthRow> {
   return rpc<MonthRow>("reopen_month", { p_month_id: month.id });
+}
+
+/**
+ * 백업 파일로 현재 가구의 재무 데이터를 통째로 교체한다 (되돌릴 수 없다).
+ * DB 함수가 한 트랜잭션으로 처리하므로 실패하면 기존 데이터는 그대로 남는다.
+ */
+export function restoreBackup(backup: BackupFile): Promise<void> {
+  return rpc<void>("restore_backup", { p_backup: backup });
 }

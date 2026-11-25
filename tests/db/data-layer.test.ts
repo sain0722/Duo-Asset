@@ -7,11 +7,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DEMO_PASSWORD, seedDemo, type SeedResult } from "../../scripts/seed-demo";
 import { currentPosition, history, lastClosedMonth, planForMonth, reportFor, workingMonth } from "@/lib/data/derive";
 import { ConflictError } from "@/lib/data/errors";
-import { closeMonth, insertRow, reopenMonth, saveAssetSnapshot, updateRow } from "@/lib/data/mutations";
+import { closeMonth, deleteRow, insertRow, reopenMonth, restoreBackup, saveAssetSnapshot, updateRow } from "@/lib/data/mutations";
 import { exportBackup, fetchHousehold } from "@/lib/data/queries";
 import { setSupabaseClient } from "@/lib/data/supabase";
 import type { HouseholdData } from "@/lib/data/types";
-import type { Asset, PlanItem } from "@/lib/finance/types";
+import type { Asset, Goal, PlanItem } from "@/lib/finance/types";
 import { adminClient, anonClient } from "./helpers";
 
 let seed: SeedResult;
@@ -197,5 +197,126 @@ describe("동시 수정", () => {
     setSupabaseClient(owner);
     await expect(closeMonth(open, staleReport)).rejects.toBeInstanceOf(ConflictError);
     expect(workingMonth(await loadAs(owner))!.id).toBe(open.id);
+  });
+});
+
+describe("계획 항목 삭제 제한", () => {
+  it("실제 값이 연결된 계획 항목은 삭제할 수 없고, 연결이 없으면 삭제된다", async () => {
+    const data = await loadAs(owner);
+    const salary = data.planItems.find((p) => p.kind === "income" && p.income_type === "salary")!;
+    await expect(deleteRow("plan_items", salary.id)).rejects.toThrow("보관 처리");
+
+    const unused = await insertRow<PlanItem>("plan_items", { kind: "expense", name: "잘못 만든 항목", amount: 1, member_id: null });
+    await expect(deleteRow("plan_items", unused.id)).resolves.toBeUndefined();
+  });
+});
+
+describe("백업과 복원", () => {
+  /** 복원 전후 비교용: 서버가 바꾸는 값(version, updated_at)을 뺀다 */
+  function comparable(rows: object[]): object[] {
+    return rows
+      .map((row) => {
+        const { version, updated_at, ...rest } = row as Record<string, unknown>;
+        void version;
+        void updated_at;
+        return rest;
+      })
+      .sort((a, b) => String((a as { id: string }).id).localeCompare(String((b as { id: string }).id)));
+  }
+
+  it("백업으로 복원하면 내보낸 시점의 데이터로 정확히 돌아간다", async () => {
+    setSupabaseClient(owner);
+    const backup = await exportBackup();
+
+    // 백업 이후 데이터를 망가뜨린다: 목표 삭제, 자산 이름 변경, 잔액 수정, 항목 추가
+    const data = await loadAs(owner);
+    await deleteRow("goals", data.goals[0].id);
+    await updateRow<Asset>("assets", data.assets[0], { name: "망가진 이름" });
+    const open = workingMonth(data)!;
+    const snapshot = data.monthData[open.id].assetSnapshots[0];
+    await saveAssetSnapshot(open.id, snapshot.asset_id, snapshot, { value: 1, principal: 1 });
+    await insertRow<Goal>("goals", { name: "백업 뒤에 만든 목표", target_amount: 1 });
+
+    await restoreBackup(backup);
+
+    const restored = await exportBackup();
+    for (const key of [
+      "assets",
+      "liabilities",
+      "planItems",
+      "assetSnapshots",
+      "liabilitySnapshots",
+      "monthEntries",
+      "goals",
+      "goalAllocations",
+      "scenarios",
+      "events",
+    ] as const) {
+      expect(comparable(restored[key]), key).toEqual(comparable(backup[key]));
+    }
+    // 마감된 달의 동결 결과도 그대로
+    expect(restored.months.map((m) => [m.month, m.status, m.summary])).toEqual(
+      backup.months.map((m) => [m.month, m.status, m.summary]),
+    );
+    // 배우자에게도 같은 데이터가 보인다
+    const theirs = await loadAs(partner);
+    expect(theirs.goals.map((g) => g.name).sort()).toEqual(backup.goals.map((g) => g.name).sort());
+  });
+
+  it("다른 가구의 백업을 복원해도 내 가구에만 쓰이고, 구성원은 순서대로 대응된다", async () => {
+    setSupabaseClient(owner);
+    const mine = await exportBackup();
+
+    // 다른 가구(새 프로젝트로 옮긴 상황을 흉내)에서 내 백업을 복원한다.
+    // 같은 DB 에 원본이 남아 있으면 행 id 가 겹치므로, 행 id 를 새로 바꾼 사본으로 시험한다.
+    const other = await seedDemo({ closedMonths: 0, quiet: true });
+    const otherOwner = await signIn(other.ownerEmail);
+    const keep = new Set([mine.household.id, ...mine.members.map((m) => m.id)]);
+    let text = JSON.stringify(mine);
+    const ids = new Set(text.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g));
+    for (const id of ids) {
+      if (!keep.has(id)) text = text.replaceAll(id, crypto.randomUUID());
+    }
+
+    setSupabaseClient(otherOwner);
+    await restoreBackup(JSON.parse(text));
+
+    const restored = await loadAs(otherOwner);
+    expect(restored.household.id).toBe(other.householdId);
+    expect(restored.assets.map((a) => a.name).sort()).toEqual(mine.assets.map((a) => a.name).sort());
+    expect(restored.assets.every((a) => a.household_id === other.householdId)).toBe(true);
+    // 첫 번째 구성원 소유 자산은 새 가구의 첫 번째 구성원 소유가 된다
+    const firstOld = mine.members[0].id;
+    const firstNew = restored.members[0].id;
+    expect(restored.assets.filter((a) => a.owner_member_id === firstNew).map((a) => a.name).sort()).toEqual(
+      mine.assets.filter((a) => a.owner_member_id === firstOld).map((a) => a.name).sort(),
+    );
+    // 마감 결과 속 주머니 id 도 새 구성원으로 바뀌어 있다
+    const closed = restored.months.find((m) => m.status === "closed" && m.summary && !m.summary.isBaseline)!;
+    expect(closed.summary!.pockets.map((p) => p.pocket)).toContain(firstNew);
+    expect(JSON.stringify(closed.summary)).not.toContain(firstOld);
+
+    // 원래 가구는 영향받지 않는다
+    setSupabaseClient(owner);
+    expect((await exportBackup()).assets).toHaveLength(mine.assets.length);
+
+    // 정리
+    const admin = adminClient();
+    const { data: members } = await admin.from("members").select("user_id").eq("household_id", other.householdId);
+    await admin.from("households").delete().eq("id", other.householdId);
+    for (const member of members ?? []) {
+      if (member.user_id) await admin.auth.admin.deleteUser(member.user_id);
+    }
+  });
+
+  it("형식이 맞지 않는 파일은 거부하고 기존 데이터는 그대로 둔다", async () => {
+    setSupabaseClient(owner);
+    const before = await exportBackup();
+    await expect(restoreBackup({ ...before, app: "other" } as never)).rejects.toThrow("백업 파일이 아니거나");
+    // 중간에 실패하는 경우(존재하지 않는 자산을 가리키는 스냅샷): 전체가 되돌려진다
+    const broken = structuredClone(before);
+    broken.assetSnapshots[0].asset_id = crypto.randomUUID();
+    await expect(restoreBackup(broken)).rejects.toThrow();
+    expect((await exportBackup()).assets).toHaveLength(before.assets.length);
   });
 });
