@@ -342,8 +342,9 @@ export interface MonthInput {
   assets: Asset[];
   liabilities: Liability[];
   planLines: PlanLine[];
-  prevAssetSnapshots: AssetSnapshot[];
-  prevLiabilitySnapshots: LiabilitySnapshot[];
+  /** 직전 달 말의 확정 상태 (직전 달 정산 결과에서 가져온다). 기준 월이면 빈 배열 */
+  prevAssetSnapshots: Pick<AssetSnapshot, "asset_id" | "value" | "principal">[];
+  prevLiabilitySnapshots: Pick<LiabilitySnapshot, "liability_id" | "balance">[];
   assetSnapshots: AssetSnapshot[];
   liabilitySnapshots: LiabilitySnapshot[];
   entries: MonthEntry[];
@@ -469,7 +470,7 @@ export interface MonthReport {
   /** 아래 흐름 지표는 isBaseline 이면 모두 0 */
   income: Won;
   consumption: Won;
-  /** 저축액 = 수입 − 소비 − 원금상환 + 신규차입 = 자산 순투입 합 − 신규차입 */
+  /** 저축액 = 수입 − 소비 − 원금상환 = 자산 순투입 합 − 신규차입 */
   savings: Won;
   /** 저축률 % (소수 1자리). 수입이 0 이면 null */
   savingsRate: number | null;
