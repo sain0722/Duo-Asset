@@ -8,10 +8,11 @@ import { MoneyInput } from "@/components/money-input";
 import { ResponsiveDialog } from "@/components/responsive-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { latestMonth } from "@/lib/data/derive";
+import { currentPosition, latestMonth } from "@/lib/data/derive";
 import { useHousehold, useMutate } from "@/lib/data/hooks";
 import { saveAssetSnapshot, updateRow } from "@/lib/data/mutations";
 import { EMPTY_MONTH_DATA } from "@/lib/data/types";
+import { plannedSavingsByAsset, principalAfter } from "@/lib/finance";
 import { ASSET_KINDS } from "@/lib/finance/meta";
 import type { Asset, AssetLine, Won } from "@/lib/finance/types";
 import { formatMonthOnly } from "@/lib/format";
@@ -41,7 +42,12 @@ function Footer({ onCancel, saving, label }: { onCancel: () => void; saving: boo
   );
 }
 
-/** 가장 최근 달의 값(스냅샷)을 기록·수정한다. 평가형은 평가금액과 순투입액을 함께. */
+/**
+ * 가장 최근 달의 값(스냅샷)을 기록·수정한다.
+ * 평가형은 정산 화면과 같은 방식으로 받는다: 기준 월은 순투입액을 직접, 그 뒤 달은 "이번 달 순입금"을 받아
+ * 순투입액 = 월초 순투입액 + 순입금 으로 저장한다. 순입금 기본값은 확인한 값이 있으면 그 값,
+ * 없으면 이 자산으로 가는 저축 계획 (정산 화면과 같은 값).
+ */
 export function AssetValueDialog({
   open,
   onOpenChange,
@@ -53,13 +59,20 @@ export function AssetValueDialog({
   asset: Asset;
   line: AssetLine | null;
 }) {
+  const data = useHousehold();
   const mutate = useMutate();
   const { latest, snapshot } = useLatestSnapshot(asset);
   const valuation = ASSET_KINDS[asset.kind].tracking === "valuation";
+  const investment = ASSET_KINDS[asset.kind].investment;
+  const report = currentPosition(data).report;
+  // 기준 월이 아니면 순투입액 대신 이번 달 순입금을 받는다 (line 이 없으면 월초 값을 몰라 순투입액을 직접 받는다)
+  const asksNet = valuation && line !== null && report !== null && !report.isBaseline;
+  const plannedNet = report ? (plannedSavingsByAsset(report.planLines)[asset.id] ?? 0) : 0;
 
   // 이번 달 값을 확인하지 않았다면 평가금액은 비워 둔다 (지난달 값을 조용히 확정하지 않기 위해)
   const [value, setValue] = useState<Won | null>(snapshot ? snapshot.value : null);
   const [principal, setPrincipal] = useState<Won | null>(snapshot?.principal ?? line?.principal ?? null);
+  const [net, setNet] = useState<Won | null>(snapshot && line ? line.contributed : plannedNet);
   const [valuedOn, setValuedOn] = useState(snapshot?.valued_on ?? "");
   const [errors, setErrors] = useState<{ value?: string; principal?: string; valuedOn?: string }>({});
   const [saving, setSaving] = useState(false);
@@ -71,7 +84,7 @@ export function AssetValueDialog({
   async function submit() {
     const next: typeof errors = {};
     if (value === null) next.value = "금액을 입력해 주세요.";
-    if (valuation && principal === null) next.principal = "순투입액을 입력해 주세요.";
+    if (valuation && investment && !asksNet && principal === null) next.principal = "순투입액을 입력해 주세요.";
     // 'YYYY-MM-DD' 는 문자열 비교로 날짜 순서가 맞다
     if (valuation && valuedOn && valuedOn > today) next.valuedOn = "오늘 이후 날짜는 고를 수 없습니다.";
     setErrors(next);
@@ -82,7 +95,7 @@ export function AssetValueDialog({
       () =>
         saveAssetSnapshot(latest!.id, asset.id, snapshot, {
           value: value!,
-          principal: valuation ? principal! : value!,
+          principal: !valuation ? value! : asksNet ? principalAfter(line!, net ?? 0) : (principal ?? value!),
           ...(valuation ? { valued_on: valuedOn || null } : {}),
         }),
       { success: `${monthLabel} 값을 저장했습니다` },
@@ -118,11 +131,25 @@ export function AssetValueDialog({
         >
           {(control) => <MoneyInput {...control} value={value} onChange={setValue} />}
         </FormField>
-        {valuation && (
+        {asksNet && (
           <FormField
-            label="순투입액"
+            label="이번 달 순입금"
+            optional
+            description={
+              !snapshot && plannedNet !== 0
+                ? "이번 달에 넣은 돈 − 뺀 돈. 이 자산으로 가는 저축 계획 금액을 넣어 두었어요."
+                : "이번 달에 넣은 돈 − 뺀 돈. 비우면 0원으로 봅니다."
+            }
+          >
+            {(control) => <MoneyInput {...control} value={net} onChange={setNet} allowNegative />}
+          </FormField>
+        )}
+        {valuation && !asksNet && (
+          <FormField
+            label={investment ? "순투입액" : "취득금액"}
+            optional={!investment}
             error={errors.principal}
-            description="이번 달에 더 넣었으면 더하고, 뺀 돈이 있으면 그만큼 줄여 주세요."
+            description={investment ? "지금까지 넣은 돈 − 뺀 돈입니다." : "산 값. 비우면 평가금액과 같다고 봅니다."}
           >
             {(control) => <MoneyInput {...control} value={principal} onChange={setPrincipal} allowNegative />}
           </FormField>

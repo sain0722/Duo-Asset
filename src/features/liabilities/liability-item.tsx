@@ -105,7 +105,7 @@ export function LiabilityItem({ model, asOf }: { model: LiabilityItemModel; asOf
             </span>
           ) : monthly ? (
             <span>
-              {monthly.month === asOf ? "매월" : `${formatYmShort(monthly.month)}부터 매월`}{" "}
+              {monthly.month === asOf ? "매월" : `${formatYm(monthly.month)}부터 매월`}{" "}
               <Money amount={monthly.payment} compact className="font-medium text-foreground" />
               {monthly.interest > 0 && <> (이자 {formatCompactWon(monthly.interest)})</>}
             </span>
@@ -114,7 +114,7 @@ export function LiabilityItem({ model, asOf }: { model: LiabilityItemModel; asOf
           )}
           {payoff?.endMonth && (
             <span>
-              {formatYmShort(payoff.endMonth)} 완납 →{" "}
+              {formatYm(payoff.endMonth)} 완납 →{" "}
               <span className="font-medium text-foreground">매월 +{formatCompactWon(payoff.freed)}</span>
             </span>
           )}

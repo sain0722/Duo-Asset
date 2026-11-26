@@ -2,7 +2,7 @@
  * 부채·고정지출 화면 전용 파생 값. 순수 함수만 둔다 (React·Supabase import 금지).
  * 상환 일정 자체는 lib/finance 의 buildSchedule 이 계산하고, 여기서는 화면에 맞게 고르고 묶는다.
  */
-import { payoffSummary, percentOf } from "@/lib/finance";
+import { payoffSummary, percentOf, scheduledPayment } from "@/lib/finance";
 import type { Liability, LiabilityLine, MonthPlan, PlanItem, PocketId, ScheduleRow, Won, Ym } from "@/lib/finance/types";
 import { pocketOf } from "@/lib/finance/meta";
 import type { HistoryPoint } from "@/lib/data/derive";
@@ -16,6 +16,29 @@ export function debtPlanTotals(plan: MonthPlan): { principal: Won; interest: Won
   const principal = debt.reduce((total, line) => total + (line.principal ?? 0), 0);
   const interest = debt.reduce((total, line) => total + (line.interest ?? 0), 0);
   return { principal, interest, payment: principal + interest };
+}
+
+export type LiabilityTerms = Pick<
+  Liability,
+  "kind" | "original_principal" | "annual_rate" | "term_months" | "start_month" | "monthly_payment"
+>;
+
+/**
+ * 전부터 있던 부채를 정산 중인 달에 등록할 때 "이번 달 갚은 원금"의 기본값.
+ * 계획은 월초 잔액(= 월말 잔액 + 갚은 원금)으로 그달 예정 원금을 잡으므로, 둘이 맞는 값을 찾는다.
+ * 원리금균등처럼 예정 원금이 월초 잔액에 따라 달라지는 방식도 몇 번 되풀이하면 원 단위로 맞는다.
+ * 일정과 남은 원금이 맞지 않아(예: 일정상 이번 달이 마지막 회차인데 원금이 남았다) 값이 정해지지 않으면 null.
+ */
+export function scheduledRepayment(terms: LiabilityTerms, month: Ym, balance: Won): Won | null {
+  // scheduledPayment 는 상환 조건만 읽는다
+  const liability = terms as Liability;
+  let repaid = 0;
+  for (let i = 0; i < 8; i += 1) {
+    const next = scheduledPayment(liability, month, balance + repaid).principal;
+    if (next === repaid) return repaid;
+    repaid = next;
+  }
+  return null;
 }
 
 /** 최초 원금 중 갚은 비율 % (소수 1자리) */

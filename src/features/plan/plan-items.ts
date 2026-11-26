@@ -1,8 +1,9 @@
 /**
  * 월급·배분 화면에서 계획 항목을 다루는 순수 함수. 계산(합계·사용 가능 금액)은 lib/finance 가 한다.
  */
+import type { HouseholdData } from "@/lib/data/types";
 import { isPlanItemActive } from "@/lib/finance/plan";
-import type { PlanItem, Ym } from "@/lib/finance/types";
+import type { MonthEntry, PlanItem, Ym } from "@/lib/finance/types";
 import { formatYmShort } from "@/lib/format";
 import { addMonths, compareYm } from "@/lib/month";
 
@@ -46,6 +47,21 @@ export function canSplitAt(item: Pick<PlanItem, "start_month" | "end_month">, fr
  */
 export function splitPlanItem(item: PlanItem, from: Ym): { endPrevious: Pick<PlanItem, "end_month">; nextStart: Ym; nextEnd: Ym | null } {
   return { endPrevious: { end_month: addMonths(from, -1) }, nextStart: from, nextEnd: item.end_month };
+}
+
+/**
+ * 나눈 뒤 새 항목으로 옮겨야 하는 실제 값: from 이후의 열린 달에서 옛 항목을 가리키는 기록.
+ * 그대로 두면 그 달의 계획 줄은 새 항목인데 실제 값은 "계획에 없던 항목"으로 떨어져 두 번 잡힌다.
+ * (마감한 달은 결과가 동결돼 있고 고칠 수도 없으므로 건드리지 않는다)
+ */
+export function entriesToRelink(
+  data: Pick<HouseholdData, "months" | "monthData">,
+  itemId: string,
+  from: Ym,
+): MonthEntry[] {
+  return data.months
+    .filter((month) => month.status !== "closed" && compareYm(month.month, from) >= 0)
+    .flatMap((month) => (data.monthData[month.id]?.entries ?? []).filter((entry) => entry.plan_item_id === itemId));
 }
 
 /** 특정 월만(months_of_year) 표기용: 1~12 */

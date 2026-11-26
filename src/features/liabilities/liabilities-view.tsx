@@ -16,14 +16,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { currentPosition, history, planForMonth, pocketName, pocketTone } from "@/lib/data/derive";
+import { basisText, currentPosition, planForMonth, pocketName, pocketTone, positionView } from "@/lib/data/derive";
 import { useHousehold } from "@/lib/data/hooks";
 import { pocketOf } from "@/lib/finance/meta";
 import { formatCompactWon, formatMonthOnly, formatYm } from "@/lib/format";
 import { addMonths } from "@/lib/month";
 import { cn } from "@/lib/utils";
 
-import { closingChange } from "@/features/assets/derive";
+import { positionChange } from "@/features/assets/derive";
 
 import { debtPlanTotals, expenseReleases, payoffInfo, releaseTimeline, scheduleStart, type Release } from "./derive";
 import { LiabilityFormDialog } from "./liability-form-dialog";
@@ -68,7 +68,8 @@ export function LiabilitiesView() {
 
   const plan = planForMonth(data, asOf);
   const scheduled = debtPlanTotals(plan);
-  const change = closingChange(history(data), (totals) => totals.liabilities);
+  const view = positionView(data);
+  const change = positionChange(view, (totals) => totals.liabilities);
 
   const models: LiabilityItemModel[] = data.liabilities
     .toSorted((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at))
@@ -116,10 +117,10 @@ export function LiabilitiesView() {
                 value={<Money amount={position.totals.liabilities} />}
                 sub={
                   <>
-                    <span>{formatYm(asOf)} 기준</span>
-                    {change !== null && change !== 0 && (
+                    {view && <span>{basisText(view.basis)}</span>}
+                    {change && change.amount !== 0 && (
                       <span>
-                        · 지난달보다 <Delta amount={change} compact />
+                        · {formatMonthOnly(change.since)} 말보다 <Delta amount={change.amount} />
                       </span>
                     )}
                   </>

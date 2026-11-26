@@ -57,6 +57,13 @@ export function AssetFormDialog({
   const [saving, setSaving] = useState(false);
 
   const valuation = ASSET_KINDS[kind].tracking === "valuation";
+  /** 투자 계좌가 아닌 평가형(자동차·부동산·기타)은 "취득금액"으로 받고, 비우면 평가금액과 같다고 본다 */
+  const investment = ASSET_KINDS[kind].investment;
+  // 수정할 때는 추적 방식(잔액형·평가형)이 같은 유형으로만 바꿀 수 있다.
+  // 방식이 바뀌면 지난 순투입액과 새 잔액의 차이가 그 달 저축·평가손익으로 잘못 잡힌다.
+  const kindOptions = editing
+    ? ASSET_KIND_ORDER.filter((option) => ASSET_KINDS[option].tracking === ASSET_KINDS[asset.kind].tracking)
+    : ASSET_KIND_ORDER;
   /** 기준 월이 아니고 "전부터 갖고 있던 자산"일 때만 이번 달에 넣은 돈을 받는다 */
   const asksContribution = !editing && !isBaseline && existedBefore;
   const ownerOptions = [
@@ -73,7 +80,7 @@ export function AssetFormDialog({
     const next: Errors = {};
     if (!name.trim()) next.name = "이름을 입력해 주세요.";
     if (!editing && value === null) next.value = "현재 평가금액을 입력해 주세요.";
-    if (!editing && valuation && principal === null) next.principal = "지금까지 넣은 돈을 입력해 주세요.";
+    if (!editing && valuation && investment && principal === null) next.principal = "지금까지 넣은 돈을 입력해 주세요.";
     if (asksContribution && contributed !== null && value !== null && contributed > value) {
       next.contributed = `${valuation ? "현재 평가금액" : "현재 잔액"}보다 클 수 없습니다.`;
     }
@@ -97,7 +104,7 @@ export function AssetFormDialog({
               asset: { ...fields, sort_order: Math.max(-1, ...data.assets.map((a) => a.sort_order)) + 1 },
               monthId: latest.id,
               value: value!,
-              principal: valuation ? principal! : value!,
+              principal: valuation ? (principal ?? value!) : value!,
               existedBefore: !isBaseline && existedBefore,
               contributedThisMonth: asksContribution ? (contributed ?? 0) : 0,
             }),
@@ -132,10 +139,19 @@ export function AssetFormDialog({
           )}
         </FormField>
 
-        <FormField label="유형">
+        <FormField
+          label="유형"
+          description={
+            editing
+              ? ASSET_KINDS[asset.kind].tracking === "valuation"
+                ? "평가금액으로 관리하는 유형끼리만 바꿀 수 있어요. 잔액형으로 바꾸려면 해지 후 새로 등록해 주세요."
+                : "잔액으로 관리하는 유형끼리만 바꿀 수 있어요. 평가형으로 바꾸려면 해지 후 새로 등록해 주세요."
+              : undefined
+          }
+        >
           {(control) => (
             <NativeSelect {...control} value={kind} onChange={(e) => changeKind(e.target.value as AssetKind)}>
-              {ASSET_KIND_ORDER.map((option) => (
+              {kindOptions.map((option) => (
                 <option key={option} value={option}>
                   {ASSET_KINDS[option].label}
                 </option>
@@ -179,9 +195,12 @@ export function AssetFormDialog({
             </FormField>
             {valuation && (
               <FormField
-                label="순투입액"
+                label={investment ? "순투입액" : "취득금액"}
+                optional={!investment}
                 error={errors.principal}
-                description="투자원금·취득금액. 지금까지 넣은 돈 − 뺀 돈입니다."
+                description={
+                  investment ? "투자원금. 지금까지 넣은 돈 − 뺀 돈입니다." : "산 값. 비우면 현재 평가금액과 같다고 봅니다."
+                }
               >
                 {(control) => <MoneyInput {...control} value={principal} onChange={setPrincipal} />}
               </FormField>

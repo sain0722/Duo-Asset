@@ -14,16 +14,16 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { pocketName, workingMonth } from "@/lib/data/derive";
 import { useHousehold, useMutate } from "@/lib/data/hooks";
-import { deleteRow, insertRow, updateRow } from "@/lib/data/mutations";
+import { deleteRow, insertRow, relinkEntries, updateRow } from "@/lib/data/mutations";
 import { INCOME_TYPE_LABELS, memberIdOf, PLAN_KIND_LABELS, pocketOf } from "@/lib/finance/meta";
-import type { IncomeType, PlanItem, PlanItemKind, PocketId, Won, Ym } from "@/lib/finance/types";
+import type { IncomeType, MonthEntry, PlanItem, PlanItemKind, PocketId, Won, Ym } from "@/lib/finance/types";
 import { JOINT } from "@/lib/finance/types";
 import { formatMonthOnly, formatYm } from "@/lib/format";
 import { addMonths, compareYm, currentYm } from "@/lib/month";
 import { cn } from "@/lib/utils";
 
 import { MonthSelect } from "./month-select";
-import { canSplitAt, MONTH_NUMBERS, splitPlanItem } from "./plan-items";
+import { canSplitAt, entriesToRelink, MONTH_NUMBERS, splitPlanItem } from "./plan-items";
 
 const KIND_ORDER: PlanItemKind[] = ["income", "expense", "saving", "contribution", "benefit"];
 const MEMBER_ONLY: PlanItemKind[] = ["contribution", "benefit"];
@@ -105,6 +105,8 @@ export function PlanItemDialog({ open, onOpenChange, target, viewedMonth }: Plan
   const splittable = item !== null && canSplitAt(item, changeFrom);
   const showChangeMode = amountChanged && item !== null && canSplitAt(item, suggestedFrom);
   const splitting = showChangeMode && changeMode === "split";
+  // 나누면 이 기록들(변경 시작 월 이후 열린 달에 이미 확인한 실제 값)을 새 항목에 다시 연결한다
+  const recorded = item && splittable ? entriesToRelink(data, item.id, changeFrom) : [];
 
   const monthRangeFrom = addMonths(data.months[0]?.month ?? currentYm(), -12);
   const monthRangeTo = addMonths(currentYm(), 60);
@@ -157,16 +159,27 @@ export function PlanItemDialog({ open, onOpenChange, target, viewedMonth }: Plan
       result = await mutate(
         async () => {
           const ended = await updateRow<PlanItem>("plan_items", item, split.endPrevious);
+          let created: PlanItem | null = null;
+          const moved: MonthEntry[] = [];
           try {
-            return await insertRow<PlanItem>("plan_items", {
+            created = await insertRow<PlanItem>("plan_items", {
               ...values,
               kind: item.kind,
               start_month: split.nextStart,
               sort_order: item.sort_order,
             });
+            // 이미 확인한 실제 값이 옛 항목을 가리킨 채로 남으면 "계획에 없던 항목"으로 떨어져 두 번 잡힌다
+            for (const entry of recorded) {
+              await relinkEntries([entry], created.id);
+              moved.push(entry);
+            }
+            return created;
           } catch (error) {
-            // 새 항목을 만들지 못했으면 기존 항목의 종료 월을 되돌린다
-            await updateRow<PlanItem>("plan_items", ended, { end_month: item.end_month }).catch(() => undefined);
+            // 하나라도 실패하면 처음 상태로 되돌린다. 되돌리지 못하면 반쯤 저장된 상태를 알린다.
+            const restored = await undoSplit(item, ended, created, moved);
+            if (!restored) {
+              throw new Error("변경을 일부만 저장했습니다. 새로고침한 뒤 이 항목과 월 정산의 수입·지출을 확인해 주세요.");
+            }
             throw error;
           }
         },
@@ -300,6 +313,7 @@ export function PlanItemDialog({ open, onOpenChange, target, viewedMonth }: Plan
                   </FormField>
                   <p className="text-caption text-muted-foreground">
                     기존 금액은 {formatYm(addMonths(changeFrom, -1))}까지 유지하고, 새 금액을 {formatYm(changeFrom)}부터 적용합니다. 지난달 기록은 그대로입니다.
+                    {recorded.length > 0 && ` ${formatMonthOnly(changeFrom)}부터 이미 확인한 실제 금액은 바뀐 항목으로 이어집니다.`}
                   </p>
                 </>
               ) : (
@@ -430,6 +444,24 @@ export function PlanItemDialog({ open, onOpenChange, target, viewedMonth }: Plan
       )}
     </>
   );
+}
+
+/**
+ * "○월부터 변경" 도중 실패했을 때 처음 상태로 되돌린다: 옮긴 실제 값을 옛 항목으로, 새 항목 삭제, 종료 월 복구.
+ * 되돌리기까지 실패하면 false (화면에서 알린다).
+ */
+async function undoSplit(item: PlanItem, ended: PlanItem, created: PlanItem | null, moved: MonthEntry[]): Promise<boolean> {
+  try {
+    for (const entry of moved) {
+      // 옮길 때 version 이 하나 올랐다 (bump_version 트리거)
+      await updateRow<MonthEntry>("month_entries", { id: entry.id, version: entry.version + 1 }, { plan_item_id: item.id });
+    }
+    if (created) await deleteRow("plan_items", created.id);
+    await updateRow<PlanItem>("plan_items", ended, { end_month: item.end_month });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function namePlaceholder(kind: PlanItemKind): string {

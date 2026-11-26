@@ -3,8 +3,8 @@
  * 재무 지표의 정의는 lib/finance 를 따르고, 여기서는 화면에 맞게 묶고 고르기만 한다.
  */
 import { ASSET_KINDS, ASSET_KIND_ORDER, percentOf } from "@/lib/finance";
-import type { Asset, AssetKind, AssetLine, BalanceTotals, PocketId, Won } from "@/lib/finance/types";
-import type { HistoryPoint } from "@/lib/data/derive";
+import type { Asset, AssetKind, AssetLine, BalanceTotals, PocketId, Won, Ym } from "@/lib/finance/types";
+import type { HistoryPoint, PositionView } from "@/lib/data/derive";
 import { pocketOf } from "@/lib/finance/meta";
 
 // ───────────────────────── 평가손익 ─────────────────────────
@@ -174,10 +174,16 @@ export function assetHistory(points: HistoryPoint[], assetId: string): AssetHist
 
 // ───────────────────────── 전월 대비 ─────────────────────────
 
-/** 가장 최근 달 말과 직전 달 말(report.closing)의 차이. 직전 달이 없으면 null */
-export function closingChange(points: HistoryPoint[], pick: (totals: BalanceTotals) => Won): Won | null {
-  if (points.length < 2) return null;
-  return pick(points[points.length - 1].report.closing) - pick(points[points.length - 2].report.closing);
+/**
+ * 지금 보여 주는 값과 비교 기준 달 말 값의 차이 (positionView 의 비교 기준을 그대로 쓴다).
+ * 새 달에 확인한 값이 없으면 마감한 달 한 달의 변화, 비교할 달이 없으면 null.
+ */
+export function positionChange(
+  view: Pick<PositionView, "totals" | "compare"> | null,
+  pick: (totals: BalanceTotals) => Won,
+): { amount: Won; since: Ym } | null {
+  if (!view?.compare) return null;
+  return { amount: pick(view.totals) - pick(view.compare.totals), since: view.compare.since };
 }
 
 // ───────────────────────── 해지·매각 ─────────────────────────

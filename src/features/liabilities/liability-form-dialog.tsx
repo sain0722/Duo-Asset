@@ -22,6 +22,8 @@ import { JOINT } from "@/lib/finance/types";
 import { formatMonthOnly } from "@/lib/format";
 import { isYm } from "@/lib/month";
 
+import { scheduledRepayment } from "./derive";
+
 type Field = "name" | "principal" | "rate" | "term" | "start" | "monthly" | "day" | "balance";
 
 /** 부채 추가(liability 없음) · 수정. 방식에 따라 필요한 칸만 보여 준다. */
@@ -53,6 +55,8 @@ export function LiabilityFormDialog({
   const [memo, setMemo] = useState(liability?.memo ?? "");
   const [balance, setBalance] = useState<Won | null>(null);
   const [existedBefore, setExistedBefore] = useState(true);
+  /** 이번 달 갚은 원금. undefined = 아직 손대지 않음(예정 원금을 보여 준다), null = 비움(0원) */
+  const [repaid, setRepaid] = useState<Won | null | undefined>(undefined);
   const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
   const [saving, setSaving] = useState(false);
 
@@ -64,7 +68,8 @@ export function LiabilityFormDialog({
   ];
   const accounts = data.assets.filter((asset) => asset.is_active || asset.id === account);
 
-  function validate() {
+  /** 입력값을 읽어 저장할 필드와 오류를 만든다 (상태는 바꾸지 않는다) */
+  function readFields() {
     const next: Partial<Record<Field, string>> = {};
     if (!name.trim()) next.name = "이름을 입력해 주세요.";
     if (original === null || original <= 0) next.principal = "처음 빌린 원금을 입력해 주세요.";
@@ -82,13 +87,11 @@ export function LiabilityFormDialog({
     const dayValue = day.trim() === "" ? null : Number(day);
     if (dayValue !== null && (!Number.isInteger(dayValue) || dayValue < 1 || dayValue > 31)) next.day = "1~31 사이로 입력해 주세요.";
     if (!editing && balance === null) next.balance = "현재 남은 원금을 입력해 주세요.";
-    setErrors(next);
-    if (Object.keys(next).length > 0) return null;
-    return {
+    const fields = {
       name: name.trim(),
       kind,
       payer_member_id: memberIdOf(payer),
-      original_principal: original!,
+      original_principal: original ?? 0,
       // 방식에 쓰이지 않는 값은 남기지 않는다 (방식을 바꿨을 때 예전 값이 계산에 끼지 않게)
       annual_rate: meta.needsRate ? rateValue : 0,
       term_months: meta.needsTerm ? termValue : null,
@@ -98,6 +101,24 @@ export function LiabilityFormDialog({
       withdraw_asset_id: account || null,
       memo: memo.trim(),
     };
+    return { errors: next, fields };
+  }
+
+  // 기준 월이 아니고 전부터 있던 부채라면, 이번 달에 이미 갚은 원금을 받는다 (자산의 "이번 달에 넣은 돈"과 같은 방식).
+  // 월초 잔액 = 월말 잔액 + 갚은 원금 으로 기록해야 계획의 예정 원금과 실제 상환이 맞는다.
+  const asksRepaid = !editing && !isBaseline && existedBefore && kind !== "interest_only";
+  // 상환 조건 칸이 다 맞을 때만 예정 원금을 계산한다 (이름·납부일 같은 칸은 상관없다)
+  const preview = asksRepaid ? readFields() : null;
+  const termsReady =
+    preview !== null && !(["principal", "rate", "term", "start", "monthly", "balance"] as const).some((key) => preview.errors[key]);
+  const suggestedRepaid =
+    termsReady && latest && balance !== null ? scheduledRepayment(preview.fields, latest.month, balance) : null;
+  const repaidValue = repaid === undefined ? suggestedRepaid : repaid;
+
+  function validate() {
+    const { errors: next, fields } = readFields();
+    setErrors(next);
+    return Object.keys(next).length > 0 ? null : fields;
   }
 
   async function submit() {
@@ -115,8 +136,8 @@ export function LiabilityFormDialog({
             try {
               await saveLiabilitySnapshot(latest.id, created.id, undefined, {
                 balance: balance!,
-                // 전부터 있던 부채: 월초 잔액도 같은 값으로 적어 이번 달 차입·상환으로 잡히지 않게 한다 (기초 조정)
-                opening_balance: !isBaseline && existedBefore ? balance! : null,
+                // 전부터 있던 부채: 월초 잔액 = 월말 잔액 + 이번 달 갚은 원금. 나머지는 차입·상환으로 잡히지 않는다 (기초 조정)
+                opening_balance: !isBaseline && existedBefore ? balance! + (asksRepaid ? (repaidValue ?? 0) : 0) : null,
               });
             } catch (error) {
               await deleteRow("liabilities", created.id).catch(() => undefined);
@@ -265,11 +286,27 @@ export function LiabilityFormDialog({
             <div className="flex flex-col gap-0.5">
               <Label htmlFor="liability-existed-before">{existedBefore ? "전부터 있던 부채" : "이번 달에 새로 빌린 돈"}</Label>
               <p className="text-caption text-muted-foreground">
-                {existedBefore ? "이번 달 저축·소비 계산에 영향을 주지 않습니다." : "이번 달 신규 차입으로 계산합니다."}
+                {existedBefore
+                  ? "그 달에 갚은 원금만 상환에 반영하고, 나머지는 저축·소비 계산에 넣지 않습니다."
+                  : "이번 달 신규 차입으로 계산합니다."}
               </p>
             </div>
             <Switch id="liability-existed-before" checked={existedBefore} onCheckedChange={setExistedBefore} className="mt-0.5" />
           </div>
+        )}
+
+        {asksRepaid && latest && (
+          <FormField
+            label={`${formatMonthOnly(latest.month)}에 갚은 원금`}
+            optional
+            description={
+              repaid === undefined && suggestedRepaid !== null
+                ? `상환 조건으로 계산한 ${formatMonthOnly(latest.month)} 예정 원금을 넣어 두었어요. 아직 안 냈으면 지워 주세요.`
+                : "그 달에 이미 낸 원금. 비우면 0원으로 봅니다."
+            }
+          >
+            {(control) => <MoneyInput {...control} value={repaidValue} onChange={setRepaid} />}
+          </FormField>
         )}
       </div>
     </ResponsiveDialog>

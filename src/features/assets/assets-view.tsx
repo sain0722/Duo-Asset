@@ -17,11 +17,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Separator } from "@/components/ui/separator";
-import { currentPosition, history, pocketName, pocketTone } from "@/lib/data/derive";
+import { basisText, currentPosition, history, pocketName, pocketTone, positionView } from "@/lib/data/derive";
 import { useHousehold } from "@/lib/data/hooks";
 import { ASSET_KINDS, pocketOf } from "@/lib/finance/meta";
 import { JOINT } from "@/lib/finance/types";
-import { formatMonthOnly, formatPercent, formatYm } from "@/lib/format";
+import { formatMonthOnly, formatPercent } from "@/lib/format";
 import { todayInSeoul } from "@/lib/month";
 import { cn } from "@/lib/utils";
 
@@ -30,11 +30,11 @@ import { ASSET_INFO } from "./info";
 import { CompositionBar } from "./composition";
 import {
   COMPOSITION_GROUPS,
-  closingChange,
   compositionHistory,
   daysUntil,
   ddayLabel,
   groupAssets,
+  positionChange,
   valuationOf,
   type AssetRow,
   type PocketFilter,
@@ -51,7 +51,8 @@ export function AssetsView() {
   const lines = position.report?.assetLines ?? [];
   const { groups, archived } = groupAssets(data.assets, lines, filter);
   const unconfirmed = lines.filter((line) => !line.confirmed).length;
-  const change = closingChange(points, (totals) => totals.assets);
+  const view = positionView(data);
+  const change = positionChange(view, (totals) => totals.assets);
 
   function openAdd() {
     setAddKey((key) => key + 1);
@@ -102,10 +103,10 @@ export function AssetsView() {
                   value={<Money amount={position.totals.assets} />}
                   sub={
                     <>
-                      {position.asOf && <span>{formatYm(position.asOf)} 기준</span>}
-                      {change !== null && (
+                      {view && <span>{basisText(view.basis)}</span>}
+                      {change && (
                         <span>
-                          · 지난달보다 <Delta amount={change} compact />
+                          · {formatMonthOnly(change.since)} 말보다 <Delta amount={change.amount} />
                         </span>
                       )}
                     </>
@@ -117,7 +118,7 @@ export function AssetsView() {
                   <SummaryItem label="가용자산" info={ASSET_INFO.liquid} amount={position.totals.liquid} />
                   <SummaryItem label="금융자산" info={ASSET_INFO.financial} amount={position.totals.financial} />
                 </dl>
-                {unconfirmed > 0 && position.asOf && (
+                {unconfirmed > 0 && position.asOf && view?.basis.kind !== "closed" && (
                   <p className="-mt-2 text-caption text-muted-foreground">
                     {formatMonthOnly(position.asOf)} 값을 아직 확인하지 않은 자산 {unconfirmed}개는 지난달 값으로 계산했어요.
                   </p>
@@ -144,7 +145,7 @@ export function AssetsView() {
                   <section key={group.kind} aria-label={group.label}>
                     <div className="flex items-baseline justify-between gap-3 pb-1">
                       <h4 className="text-sm font-semibold text-muted-foreground">{group.label}</h4>
-                      <Money amount={group.total} compact className="text-sm text-muted-foreground" />
+                      <Money amount={group.total} className="text-sm text-muted-foreground" />
                     </div>
                     <ul className="divide-y">
                       {group.rows.map((row) => (
@@ -165,17 +166,25 @@ export function AssetsView() {
                   순자산 추이
                   <InfoTip title="순자산">{ASSET_INFO.netWorth}</InfoTip>
                 </CardTitle>
-                <CardDescription>월말 기준 · 이번 달은 잠정</CardDescription>
+                {points.length >= 2 && <CardDescription>월말 기준 · 이번 달은 잠정</CardDescription>}
               </CardHeader>
               <CardContent>
-                <MoneyChart
-                  type="area"
-                  label="월별 순자산 추이"
-                  data={points.map((point) => ({ month: point.month, netWorth: point.report.closing.netWorth }))}
-                  xKey="month"
-                  series={[{ key: "netWorth", label: "순자산" }]}
-                  height={200}
-                />
+                {points.length < 2 ? (
+                  <EmptyState
+                    className="py-6"
+                    title="두 달 이상 기록되면 추이를 보여 드려요"
+                    description="매달 정산하면 월말 순자산이 여기에 쌓입니다."
+                  />
+                ) : (
+                  <MoneyChart
+                    type="area"
+                    label="월별 순자산 추이"
+                    data={points.map((point) => ({ month: point.month, netWorth: point.report.closing.netWorth }))}
+                    xKey="month"
+                    series={[{ key: "netWorth", label: "순자산" }]}
+                    height={200}
+                  />
+                )}
               </CardContent>
             </Card>
             <Card>

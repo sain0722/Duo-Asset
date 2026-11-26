@@ -5,13 +5,13 @@ import type { Asset, AssetLine, MonthReport } from "@/lib/finance/types";
 
 import {
   assetHistory,
-  closingChange,
   compositionHistory,
   compositionOf,
   daysUntil,
   ddayLabel,
   disposalSnapshot,
   groupAssets,
+  positionChange,
   valuationOf,
 } from "./derive";
 
@@ -155,11 +155,17 @@ describe("assetHistory", () => {
   });
 });
 
-describe("closingChange", () => {
+describe("positionChange", () => {
   const totals = (assets: number) => ({ assets, liabilities: 0, netWorth: assets, liquid: 0, financial: 0, byKind: {} });
-  it("직전 달 말 대비", () => {
-    expect(closingChange([point("2026-10", { closing: totals(100) }), point("2026-11", { closing: totals(130) })], (t) => t.assets)).toBe(30);
-    expect(closingChange([point("2026-11", { closing: totals(130) })], (t) => t.assets)).toBeNull();
+  it("비교 기준 달 말 대비", () => {
+    expect(positionChange({ totals: totals(130), compare: { totals: totals(100), since: "2026-09" } }, (t) => t.assets)).toEqual({
+      amount: 30,
+      since: "2026-09",
+    });
+  });
+  it("비교할 달이 없으면 null", () => {
+    expect(positionChange({ totals: totals(130), compare: null }, (t) => t.assets)).toBeNull();
+    expect(positionChange(null, (t) => t.assets)).toBeNull();
   });
 });
 

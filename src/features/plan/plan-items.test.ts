@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { planItem } from "@/lib/finance/testing";
+import { entry, planItem } from "@/lib/finance/testing";
+import type { MonthRow } from "@/lib/finance/types";
 
-import { canSplitAt, inactiveReason, periodLabel, splitPlanItem } from "./plan-items";
+import { canSplitAt, entriesToRelink, inactiveReason, periodLabel, splitPlanItem } from "./plan-items";
+
+function monthRow(month: string, status: MonthRow["status"]): MonthRow {
+  return { id: `m-${month}`, month, status } as MonthRow;
+}
 
 describe("plan-items", () => {
   it("적용 기간을 짧게 표기한다", () => {
@@ -36,5 +41,28 @@ describe("plan-items", () => {
       nextEnd: "2027-12",
     });
     expect(splitPlanItem(item, "2027-01").endPrevious.end_month).toBe("2026-12");
+  });
+
+  it("나눌 때 변경 시작 월 이후 열린 달의 실제 값만 새 항목으로 옮긴다", () => {
+    const salary = planItem({ kind: "income", amount: 4_000_000 });
+    const other = planItem({ kind: "income", amount: 1_000_000 });
+    const sep = entry({ kind: "income", amount: 4_000_000, plan_item_id: salary.id, month_id: "m-2026-09" });
+    const oct = entry({ kind: "income", amount: 4_000_000, plan_item_id: salary.id, month_id: "m-2026-10" });
+    const octOther = entry({ kind: "income", amount: 1_000_000, plan_item_id: other.id, month_id: "m-2026-10" });
+    const octExtra = entry({ kind: "income", amount: 300_000, plan_item_id: null, month_id: "m-2026-10" });
+    const nov = entry({ kind: "income", amount: 4_000_000, plan_item_id: salary.id, month_id: "m-2026-11" });
+    const data = {
+      months: [monthRow("2026-08", "closed"), monthRow("2026-09", "open"), monthRow("2026-10", "open"), monthRow("2026-11", "open")],
+      monthData: {
+        "m-2026-08": { assetSnapshots: [], liabilitySnapshots: [], entries: [] },
+        "m-2026-09": { assetSnapshots: [], liabilitySnapshots: [], entries: [sep] },
+        "m-2026-10": { assetSnapshots: [], liabilitySnapshots: [], entries: [oct, octOther, octExtra] },
+        "m-2026-11": { assetSnapshots: [], liabilitySnapshots: [], entries: [nov] },
+      },
+    };
+    expect(entriesToRelink(data, salary.id, "2026-10")).toEqual([oct, nov]);
+    expect(entriesToRelink(data, salary.id, "2026-12")).toEqual([]);
+    // 마감한 달은 건드리지 않는다
+    expect(entriesToRelink(data, salary.id, "2026-08")).toEqual([sep, oct, nov]);
   });
 });
