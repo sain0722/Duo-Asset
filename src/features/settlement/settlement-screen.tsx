@@ -62,7 +62,7 @@ export function SettlementScreen() {
   return (
     <PageContainer>
       {header}
-      <div className="grid gap-4 sm:gap-5 lg:grid-cols-[17rem_minmax(0,1fr)] lg:items-start lg:gap-6">
+      <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-[17rem_minmax(0,1fr)] lg:items-start lg:gap-6">
         <div className="hidden lg:flex lg:flex-col lg:gap-4 lg:self-stretch">
           <aside aria-label="정산 이력">
             <Card className="gap-2 py-3 sm:gap-2 sm:py-3">

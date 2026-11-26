@@ -235,7 +235,7 @@ function AssetRow({ line, plannedSaving }: { line: AssetLine; plannedSaving: Won
       {showEditor && (
         <EditGroup onCommit={commit} className="mt-2 flex flex-col gap-1">
           {valuation ? (
-            <div className="grid gap-x-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-2">
               <LabeledInput label="평가금액">
                 <InputWithQuick
                   input={

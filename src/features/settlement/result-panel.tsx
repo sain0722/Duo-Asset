@@ -76,7 +76,7 @@ export function ResultBody({
     return (
       <div className="flex flex-col gap-5">
         <Stat size="lg" label="순자산" info={<MetricTip id="netWorth" />} value={<Money amount={report.closing.netWorth} />} />
-        <dl className="grid gap-3 sm:grid-cols-2">
+        <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Metric label="총자산" amount={report.closing.assets} />
           <Metric label="총부채" amount={report.closing.liabilities} />
         </dl>
@@ -101,7 +101,7 @@ export function ResultBody({
         </ul>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-2 lg:gap-10">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-10">
         <div className="flex flex-col gap-5">
           <Stat
             size="lg"

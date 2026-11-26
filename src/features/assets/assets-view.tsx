@@ -92,7 +92,7 @@ export function AssetsView() {
           />
         </Card>
       ) : (
-        <div className="grid items-start gap-4 sm:gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
+        <div className="grid grid-cols-1 items-start gap-4 sm:gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
           <div className="flex min-w-0 flex-col gap-4 sm:gap-5">
             <Card>
               <CardContent className="flex flex-col gap-6">
@@ -116,7 +116,7 @@ export function AssetsView() {
                 />
                 <CompositionBar byKind={position.totals.byKind} />
                 <Separator />
-                <dl className="grid gap-3 sm:grid-cols-2 sm:gap-6">
+                <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-6">
                   <SummaryItem label="가용자산" info={ASSET_INFO.liquid} amount={position.totals.liquid} />
                   <SummaryItem label="금융자산" info={ASSET_INFO.financial} amount={position.totals.financial} />
                 </dl>

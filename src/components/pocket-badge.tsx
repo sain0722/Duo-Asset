@@ -23,7 +23,7 @@ type PocketBadgeProps = React.ComponentProps<"span"> & {
 /** 색 점 + 이름. 글자는 본문 색 그대로 두고 점만 색을 가진다. */
 function PocketBadge({ tone, className, children, ...props }: PocketBadgeProps) {
   return (
-    <span data-slot="pocket-badge" className={cn("inline-flex min-w-0 items-center gap-1.5 text-sm font-medium", className)} {...props}>
+    <span data-slot="pocket-badge" className={cn("inline-flex max-w-full min-w-0 items-center gap-1.5 text-sm font-medium", className)} {...props}>
       <span aria-hidden className={cn("size-2 shrink-0 rounded-full", dotClassName[tone])} />
       <span className="truncate">{children}</span>
     </span>

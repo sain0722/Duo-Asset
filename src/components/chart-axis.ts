@@ -36,13 +36,24 @@ export function moneyAxis(values: readonly number[], fromZero: boolean): MoneyAx
   const max = fromZero ? Math.max(dataMax, 0) : dataMax;
   const magnitude = Math.max(Math.abs(min), Math.abs(max));
   const unit = labelUnit(magnitude);
+  // 자동 눈금의 간격이 표기 단위보다 작아질 수 있는 범위에서만 눈금을 직접 정한다
   if (max - min >= 3 * unit) return auto;
 
-  // 값이 모두 같으면 크기의 5% 안팎으로 넉넉하게, 조금이라도 다르면 표기 단위만큼만 넓힌다 (변화가 보이도록)
-  const step = min === max ? Math.max(niceFloor(magnitude * 0.05), unit, 10_000) : unit;
-  let low = Math.floor(min / step) * step - step;
-  if (min >= 0) low = Math.max(low, 0);
-  const steps = Math.max(Math.ceil((max - low) / step / 3), 1) * 3;
-  const stride = (steps / 3) * step;
-  return { domain: [low, low + stride * 3], ticks: [0, 1, 2, 3].map((index) => low + stride * index) };
+  if (min === max) {
+    // 값이 모두 같다: 크기의 5% 안팎 간격으로 위아래에 여유를 둔다
+    const step = Math.max(niceFloor(magnitude * 0.05), unit, 10_000);
+    let low = Math.floor(min / step) * step - step;
+    if (min >= 0) low = Math.max(low, 0);
+    return ticksFrom(low, step, 3);
+  }
+
+  // 값이 조금 다르다: 표기 단위의 배수로 값의 범위를 딱 감싼다 (변화가 납작해 보이지 않게 여유를 더 두지 않는다)
+  const low = Math.floor(min / unit) * unit;
+  const count = Math.max(Math.ceil((max - low) / unit), 2);
+  return ticksFrom(low, unit, count);
+}
+
+function ticksFrom(low: number, step: number, count: number): MoneyAxis {
+  const ticks = Array.from({ length: count + 1 }, (_, index) => low + step * index);
+  return { domain: [low, low + step * count], ticks };
 }

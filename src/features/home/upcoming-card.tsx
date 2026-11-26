@@ -90,7 +90,7 @@ export function UpcomingCard({ data, upcoming, className }: { data: HouseholdDat
       <CardHeader>
         <CardTitle>다가오는 일</CardTitle>
       </CardHeader>
-      <CardContent className="grid gap-5 lg:grid-cols-3 lg:gap-8">
+      <CardContent className="grid grid-cols-1 gap-5 lg:grid-cols-3 lg:gap-8">
         {upcoming.thisMonth.length > 0 && (
           <Group title="이번 달 남은 일정">
             {upcoming.thisMonth.map((item) => (

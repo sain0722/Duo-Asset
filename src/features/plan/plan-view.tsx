@@ -97,7 +97,7 @@ export function PlanView() {
         {status.note && <p className="text-caption text-muted-foreground">{status.note}</p>}
       </div>
 
-      <div className="grid gap-4 sm:gap-5 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-3">
         <SummaryCard plan={plan} />
         {plan.members.map((memberPlan) => (
           <MemberCard key={memberPlan.memberId} data={data} plan={memberPlan} itemById={itemById} onEdit={edit} onAdd={add} />
@@ -144,7 +144,7 @@ function SummaryCard({ plan }: { plan: MonthPlan }) {
 
   return (
     <Card className="lg:col-span-3">
-      <CardContent className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-end lg:gap-10">
+      <CardContent className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-end lg:gap-10">
         <Stat
           size="lg"
           label="합산 월수입"
@@ -162,7 +162,7 @@ function SummaryCard({ plan }: { plan: MonthPlan }) {
             segments={parts.map(({ key, label, amount, className }) => ({ key, label, amount, className }))}
             className="h-3"
           />
-          <dl className="grid gap-3 sm:grid-cols-3 sm:gap-4">
+          <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
             {parts.map((part) => (
               <div key={part.key} className="flex items-baseline justify-between gap-3 sm:flex-col sm:items-start sm:gap-1">
                 <dt className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
@@ -530,7 +530,7 @@ function UnusedCard({ data, plan, month, onEdit }: { data: HouseholdData; plan: 
         <CardTitle>이 달에 빠진 항목</CardTitle>
       </CardHeader>
       <CardContent>
-        <ul className="grid gap-x-8 sm:grid-cols-2 lg:grid-cols-3">
+        <ul className="grid grid-cols-1 gap-x-8 sm:grid-cols-2 lg:grid-cols-3">
           {unused.map((item) => {
             const pocket = item.member_id ?? JOINT;
             return (

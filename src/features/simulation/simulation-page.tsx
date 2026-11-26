@@ -92,7 +92,7 @@ function Simulation({ baseId }: { baseId: string }) {
     <div className="flex flex-col gap-4 sm:gap-5">
       <ScenarioControls scenarios={scenarios} selected={selected} base={base} onSelect={setSelectedId} />
 
-      <div className="grid items-start gap-4 sm:gap-5 lg:grid-cols-[minmax(0,1fr)_23rem]">
+      <div className="grid grid-cols-1 items-start gap-4 sm:gap-5 lg:grid-cols-[minmax(0,1fr)_23rem]">
         <div className="flex min-w-0 flex-col gap-4 sm:gap-5">
           <Card>
             <CardHeader>
@@ -146,7 +146,7 @@ function Simulation({ baseId }: { baseId: string }) {
               {!isBase && <CardAction className="text-caption text-muted-foreground">{base.name} 대비</CardAction>}
             </CardHeader>
             <CardContent className="flex flex-col gap-5">
-              <dl className="grid gap-4 sm:grid-cols-3">
+              <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 {rows.map((row) => (
                   <div key={row.years} className="flex items-baseline justify-between gap-3 sm:flex-col sm:items-start sm:gap-1">
                     <dt className="text-sm text-muted-foreground">

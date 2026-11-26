@@ -75,7 +75,7 @@ export function KitControls() {
   const [dialogBalance, setDialogBalance] = useState<number | null>(null);
 
   return (
-    <div className="grid items-start gap-4 sm:gap-5 lg:grid-cols-2">
+    <div className="grid grid-cols-1 items-start gap-4 sm:gap-5 lg:grid-cols-2">
       {/* 입력 폼 */}
       <Card>
         <CardHeader>

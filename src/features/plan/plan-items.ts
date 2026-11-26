@@ -52,7 +52,11 @@ export function splitPlanItem(item: PlanItem, from: Ym): { endPrevious: Pick<Pla
 /**
  * 나눈 뒤 새 항목으로 옮겨야 하는 실제 값: from 이후의 열린 달에서 옛 항목을 가리키는 기록.
  * 그대로 두면 그 달의 계획 줄은 새 항목인데 실제 값은 "계획에 없던 항목"으로 떨어져 두 번 잡힌다.
- * (마감한 달은 결과가 동결돼 있고 고칠 수도 없으므로 건드리지 않는다)
+ *
+ * 계획이 동결된 달은 건드리지 않는다:
+ *  - 마감한 달: 결과가 동결돼 있고 고칠 수도 없다.
+ *  - 마감했다가 다시 연 달(summary 가 남아 있다): 계획 줄이 마감 당시 그대로라 옛 항목을 가리킨다.
+ *    여기서 실제 값을 새 항목으로 옮기면 오히려 계획 줄과 어긋나 두 번 잡힌다.
  */
 export function entriesToRelink(
   data: Pick<HouseholdData, "months" | "monthData">,
@@ -60,7 +64,7 @@ export function entriesToRelink(
   from: Ym,
 ): MonthEntry[] {
   return data.months
-    .filter((month) => month.status !== "closed" && compareYm(month.month, from) >= 0)
+    .filter((month) => month.status !== "closed" && !month.summary && compareYm(month.month, from) >= 0)
     .flatMap((month) => (data.monthData[month.id]?.entries ?? []).filter((entry) => entry.plan_item_id === itemId));
 }
 

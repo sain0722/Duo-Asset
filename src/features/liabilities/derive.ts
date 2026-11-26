@@ -25,20 +25,26 @@ export type LiabilityTerms = Pick<
 
 /**
  * 전부터 있던 부채를 정산 중인 달에 등록할 때 "이번 달 갚은 원금"의 기본값.
- * 계획은 월초 잔액(= 월말 잔액 + 갚은 원금)으로 그달 예정 원금을 잡으므로, 둘이 맞는 값을 찾는다.
- * 원리금균등처럼 예정 원금이 월초 잔액에 따라 달라지는 방식도 몇 번 되풀이하면 원 단위로 맞는다.
+ * 계획은 월초 잔액(= 월말 잔액 + 갚은 원금)으로 그달 예정 원금을 잡으므로, 둘이 맞는 월초 잔액을 찾는다:
+ *   월초 잔액 − 예정 원금(월초 잔액) = 월말 잔액
+ * 좌변은 월초 잔액이 커질수록 줄지 않으므로 이분 탐색으로 찾는다 (원리금균등의 마지막 몇 회차도 정확히 맞는다).
  * 일정과 남은 원금이 맞지 않아(예: 일정상 이번 달이 마지막 회차인데 원금이 남았다) 값이 정해지지 않으면 null.
  */
 export function scheduledRepayment(terms: LiabilityTerms, month: Ym, balance: Won): Won | null {
   // scheduledPayment 는 상환 조건만 읽는다
   const liability = terms as Liability;
-  let repaid = 0;
-  for (let i = 0; i < 8; i += 1) {
-    const next = scheduledPayment(liability, month, balance + repaid).principal;
-    if (next === repaid) return repaid;
-    repaid = next;
+  const remainingAfter = (opening: Won) => opening - scheduledPayment(liability, month, opening).principal;
+
+  let low = balance;
+  let high = balance + Math.max(terms.original_principal, balance);
+  if (remainingAfter(high) < balance) return null;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (remainingAfter(mid) >= balance) high = mid;
+    else low = mid + 1;
   }
-  return null;
+  // 반올림 때문에 1원까지는 어긋날 수 있다
+  return Math.abs(remainingAfter(low) - balance) <= 1 ? low - balance : null;
 }
 
 /** 최초 원금 중 갚은 비율 % (소수 1자리) */

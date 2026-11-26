@@ -195,7 +195,7 @@ function LiabilityRow({ line }: { line: LiabilityLine }) {
       {(!line.confirmed || editing) && (
         <EditGroup onCommit={() => balance !== null && persist(balance, interest)} className="mt-2 flex flex-col gap-1">
           {withInterest ? (
-            <div className="grid gap-x-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-2">
               <div className="flex min-w-0 flex-col gap-1.5">
                 <span className="text-caption font-medium text-muted-foreground">남은 원금</span>
                 {balanceInput}

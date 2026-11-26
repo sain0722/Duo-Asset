@@ -74,7 +74,7 @@ export function KitOverview() {
         <Badge variant="warning">정산 전</Badge>
       </div>
 
-      <div className="grid gap-4 sm:gap-5 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-3">
         {/* 대표 숫자 */}
         <Card className="lg:col-span-2">
           <CardContent className="flex flex-1 flex-col gap-6">
@@ -90,7 +90,7 @@ export function KitOverview() {
               }
             />
             <Separator className="mt-auto" />
-            <dl className="grid gap-3 sm:grid-cols-3 sm:gap-6">
+            <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-6">
               {[
                 { label: "총자산", amount: 412_000_000 },
                 { label: "총부채", amount: 63_800_000 },

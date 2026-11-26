@@ -34,7 +34,7 @@ export function NetWorthHero({ hero, freeLiquid, className }: { hero: HeroView; 
           <p className="text-caption text-muted-foreground">{basisText(basis)}</p>
         </div>
         <Separator />
-        <dl className="grid gap-3.5 sm:grid-cols-3 sm:gap-6">
+        <dl className="grid grid-cols-1 gap-3.5 sm:grid-cols-3 sm:gap-6">
           <HeroItem label="총자산" info={<AssetsTip />} amount={totals.assets} />
           <HeroItem label="총부채" info={<LiabilitiesTip />} amount={totals.liabilities} />
           <HeroItem

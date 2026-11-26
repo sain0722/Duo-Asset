@@ -92,7 +92,7 @@ export function AssetDetail() {
         actions={<AssetActions asset={asset} line={line} onDeleted={() => router.replace("/assets")} />}
       />
 
-      <div className="grid items-start gap-4 sm:gap-5 lg:grid-cols-3">
+      <div className="grid grid-cols-1 items-start gap-4 sm:gap-5 lg:grid-cols-3">
         <Card className="lg:row-span-2">
           <CardContent className="flex flex-col gap-5">
             <Stat

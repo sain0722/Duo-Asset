@@ -17,18 +17,26 @@ describe("moneyAxis", () => {
     expect(moneyAxis([48_000_000, 48_000_000], false).ticks).toEqual([46_000_000, 48_000_000, 50_000_000, 52_000_000]);
   });
 
-  it("표기 단위(0.1억)보다 변화가 작으면 그 단위로 눈금을 나눈다", () => {
-    const axis = moneyAxis([1_231_000_000, 1_236_000_000], false);
-    expect(axis.ticks).toEqual([1_220_000_000, 1_230_000_000, 1_240_000_000, 1_250_000_000]);
+  it("변화가 표기 단위(0.1억) 몇 칸뿐이면 그 단위의 배수로 값의 범위를 딱 감싼다", () => {
+    // 1.429억 → 1.642억: 자동 눈금과 같은 1.4 · 1.5 · 1.6 · 1.7억 (위아래로 여유를 더 두지 않는다)
+    expect(moneyAxis([142_900_000, 164_158_000], false)).toEqual({
+      domain: [140_000_000, 170_000_000],
+      ticks: [140_000_000, 150_000_000, 160_000_000, 170_000_000],
+    });
+    // 1.502억 → 1.642억: 자동 눈금(0.05억 간격)은 "1.6억"이 두 번 찍힌다
+    expect(moneyAxis([150_200_000, 164_200_000], false).ticks).toEqual([150_000_000, 160_000_000, 170_000_000]);
+    // 변화가 한 칸보다 작아도 눈금은 세 개
+    expect(moneyAxis([1_231_000_000, 1_236_000_000], false).ticks).toEqual([1_230_000_000, 1_240_000_000, 1_250_000_000]);
   });
 
-  it("넓힌 범위는 항상 모든 값을 포함한다", () => {
-    for (const values of [[5_000], [0], [-30_000_000], [99_999_999, 100_000_001], [1_000_000_000, 1_029_999_999]]) {
+  it("넓힌 범위는 항상 모든 값을 포함하고 눈금 글자가 겹치지 않는다", () => {
+    for (const values of [[5_000], [0], [-30_000_000], [99_999_999, 100_000_001], [1_000_000_000, 1_029_999_999], [149_000_000, 178_000_000]]) {
       const axis = moneyAxis(values, false);
       const [low, high] = axis.domain as [number, number];
       expect(low).toBeLessThanOrEqual(Math.min(...values));
       expect(high).toBeGreaterThanOrEqual(Math.max(...values));
-      expect(new Set(axis.ticks).size).toBe(4);
+      expect(axis.ticks!.length).toBeGreaterThanOrEqual(3);
+      expect(new Set(axis.ticks).size).toBe(axis.ticks!.length);
     }
   });
 

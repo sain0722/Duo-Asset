@@ -28,6 +28,7 @@ import { LiabilitySection } from "./liability-section";
 import {
   checklist,
   overspentPockets,
+  suspiciousBalances,
   POCKET_OVERSPEND_PERCENT,
   progressOf,
   remainingAfter,
@@ -81,9 +82,13 @@ function OpenMonthInner({
   const label = formatMonthOnly(month.month);
   const baseline = report.isBaseline;
 
-  // 모바일은 확인할 것이 남은 영역만 펼쳐 두고, PC 는 모두 펼친다
+  // 자릿수 실수가 의심되는 잔액. 마감은 막지 않고 알리기만 한다
+  const jumps = useMemo(() => suspiciousBalances(report), [report]);
+
+  // 모바일은 확인할 것이 남은 영역(과 다시 볼 잔액이 있는 영역)만 펼쳐 두고, PC 는 모두 펼친다
   const [openSections, setOpenSections] = useState<Record<SectionId, boolean>>(() => {
-    const pendingIn = (section: SectionId) => items.some((item) => item.section === section && !item.done);
+    const pendingIn = (section: SectionId) =>
+      items.some((item) => item.section === section && !item.done) || jumps.some((jump) => jump.section === section);
     return {
       income: isDesktop || pendingIn("income"),
       assets: isDesktop || pendingIn("assets"),
@@ -151,6 +156,15 @@ function OpenMonthInner({
   const overspendNotice =
     overspent.length > 0
       ? `${overspent.map((p) => `${p.name} 소비가 계획 대비 ${formatPercent(p.usage)}`).join(", ")}예요. 잔액을 잘못 입력하지 않았는지 확인해 주세요.`
+      : null;
+  // 계획이 없는 주머니는 위 안내가 나오지 않으므로, 크게 달라진 잔액도 마감 전에 한 번 더 알린다
+  const jumpNotice =
+    jumps.length > 0 ? `${jumps.map((jump) => jump.name).join(", ")} 잔액이 전월보다 크게 달라졌어요. 자릿수를 확인해 주세요.` : null;
+  const closeNotice = [jumpNotice, overspendNotice].filter(Boolean).join(" ") || null;
+  const shortNotice = jumpNotice
+    ? "전월보다 크게 달라진 잔액이 있어요. 마감 전에 확인해 주세요."
+    : overspendNotice
+      ? `소비가 계획 대비 ${POCKET_OVERSPEND_PERCENT}%를 넘은 주머니가 있어요. 결과를 확인해 주세요.`
       : null;
 
   return (
@@ -256,9 +270,9 @@ function OpenMonthInner({
           <CardContent>
             <ResultBody data={data} report={report} remaining={remaining} onJump={jumpToItem} />
           </CardContent>
-          {closable && overspendNotice && (
+          {closeNotice && (
             <div className="px-5 sm:px-6">
-              <OverspendNotice text={overspendNotice} />
+              <OverspendNotice text={closeNotice} />
             </div>
           )}
         </Card>
@@ -290,7 +304,7 @@ function OpenMonthInner({
             closable={closable}
             canCloseNow={canCloseNow}
             closeReason={closeReason}
-            overspendNotice={overspendNotice}
+            notice={shortNotice}
             blocker={blocker?.month ?? null}
             onNext={nextUnconfirmed}
             onClose={requestClose}
@@ -304,8 +318,8 @@ function OpenMonthInner({
         onOpenChange={setConfirming}
         title={`${label} 정산을 마감할까요?`}
         description={
-          overspendNotice
-            ? `${overspendNotice} 마감하면 이 달의 결과가 확정되고 ${nextLabel}이 열립니다.`
+          closeNotice
+            ? `${closeNotice} 마감하면 이 달의 결과가 확정되고 ${nextLabel}이 열립니다.`
             : `이 달의 결과가 확정되고 ${nextLabel}이 열립니다. 가장 최근에 마감한 달은 다시 열어 고칠 수 있습니다.`
         }
         confirmLabel="마감"
@@ -333,7 +347,7 @@ function DesktopProgress({
   closable,
   canCloseNow,
   closeReason,
-  overspendNotice,
+  notice,
   blocker,
   onNext,
   onClose,
@@ -346,7 +360,7 @@ function DesktopProgress({
   closable: boolean;
   canCloseNow: boolean;
   closeReason: string | null;
-  overspendNotice: string | null;
+  notice: string | null;
   blocker: Ym | null;
   onNext?: () => void;
   onClose: () => void;
@@ -376,7 +390,7 @@ function DesktopProgress({
         )}
         {closable ? (
           <>
-            {overspendNotice && <p className="text-caption text-warning-foreground">소비가 계획 대비 {POCKET_OVERSPEND_PERCENT}%를 넘은 주머니가 있어요. 결과를 확인해 주세요.</p>}
+            {notice && <p className="text-caption text-warning-foreground">{notice}</p>}
             <Button size="lg" className="w-full" disabled={!canCloseNow} onClick={onClose}>
               {label} 마감
             </Button>

@@ -106,10 +106,10 @@ export function LiabilitiesView() {
   return (
     <PageContainer>
       {header}
-      <div className="grid items-start gap-4 sm:gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
+      <div className="grid grid-cols-1 items-start gap-4 sm:gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
         <div className="flex min-w-0 flex-col gap-4 sm:gap-5">
           <Card>
-            <CardContent className="grid gap-6 sm:grid-cols-2">
+            <CardContent className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               <Stat
                 size="lg"
                 label="총부채"

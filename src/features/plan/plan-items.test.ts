@@ -65,4 +65,20 @@ describe("plan-items", () => {
     // 마감한 달은 건드리지 않는다
     expect(entriesToRelink(data, salary.id, "2026-08")).toEqual([sep, oct, nov]);
   });
+
+  it("마감했다가 다시 연 달의 실제 값은 옮기지 않는다 (그 달의 계획 줄은 마감 당시 그대로다)", () => {
+    const salary = planItem({ kind: "income", amount: 4_000_000 });
+    const sep = entry({ kind: "income", amount: 4_000_000, plan_item_id: salary.id, month_id: "m-2026-09" });
+    const oct = entry({ kind: "income", amount: 4_000_000, plan_item_id: salary.id, month_id: "m-2026-10" });
+    // 9월은 마감 뒤 다시 열었다: 동결된 계획 줄이 옛 항목을 가리킨다
+    const reopened = { ...monthRow("2026-09", "open"), summary: { planLines: [{ planItemId: salary.id }] } } as MonthRow;
+    const data = {
+      months: [monthRow("2026-08", "closed"), reopened, monthRow("2026-10", "open")],
+      monthData: {
+        "m-2026-09": { assetSnapshots: [], liabilitySnapshots: [], entries: [sep] },
+        "m-2026-10": { assetSnapshots: [], liabilitySnapshots: [], entries: [oct] },
+      },
+    };
+    expect(entriesToRelink(data, salary.id, "2026-09")).toEqual([oct]);
+  });
 });

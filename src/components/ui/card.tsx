@@ -18,8 +18,9 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="card-header"
       className={cn(
-        "grid auto-rows-min items-start gap-1 px-5 sm:px-6",
-        "has-data-[slot=card-action]:grid-cols-[1fr_auto] has-data-[slot=card-action]:gap-x-3",
+        // 열 최소 폭을 0 으로 둔다: 긴 이름이 카드를 화면 밖으로 밀어내지 않고 줄바꿈·말줄임된다
+        "grid auto-rows-min grid-cols-1 items-start gap-1 px-5 sm:px-6",
+        "has-data-[slot=card-action]:grid-cols-[minmax(0,1fr)_auto] has-data-[slot=card-action]:gap-x-3",
         className,
       )}
       {...props}
@@ -28,7 +29,7 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
 }
 
 function CardTitle({ className, ...props }: React.ComponentProps<"h3">) {
-  return <h3 data-slot="card-title" className={cn("text-base leading-snug font-semibold", className)} {...props} />;
+  return <h3 data-slot="card-title" className={cn("min-w-0 text-base leading-snug font-semibold", className)} {...props} />;
 }
 
 function CardDescription({ className, ...props }: React.ComponentProps<"p">) {

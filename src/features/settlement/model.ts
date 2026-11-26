@@ -166,6 +166,23 @@ export const BALANCE_JUMP_HINT: Record<BalanceJump, string> = {
   rise: "전월보다 크게 늘었어요. 자릿수를 확인해 주세요.",
 };
 
+/** 확인한 잔액 중 월초보다 크게 달라진 항목 (자산·부채). 기준 월에는 비교할 값이 없다 */
+export function suspiciousBalances(
+  report: Pick<MonthReport, "isBaseline" | "assetLines" | "liabilityLines">,
+): { section: "assets" | "liabilities"; name: string; jump: BalanceJump }[] {
+  if (report.isBaseline) return [];
+  const found: { section: "assets" | "liabilities"; name: string; jump: BalanceJump }[] = [];
+  for (const line of report.assetLines) {
+    const jump = line.confirmed ? balanceJump(line.openValue, line.value) : null;
+    if (jump) found.push({ section: "assets", name: line.name, jump });
+  }
+  for (const line of report.liabilityLines) {
+    const jump = line.confirmed ? balanceJump(line.openBalance, line.balance) : null;
+    if (jump) found.push({ section: "liabilities", name: line.name, jump });
+  }
+  return found;
+}
+
 /** 계획 대비 소비가 POCKET_OVERSPEND_PERCENT 를 넘은 주머니 (정산이 끝난 결과에서만 의미가 있다) */
 export function overspentPockets(report: Pick<MonthReport, "complete" | "isBaseline" | "pockets">): { pocket: PocketId; name: string; usage: number }[] {
   if (!report.complete || report.isBaseline) return [];

@@ -111,7 +111,7 @@ export function JointView() {
         </div>
       )}
 
-      <div className="grid gap-4 sm:gap-5 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-3">
         <FlowCard
           summary={summary}
           settled={settled}
@@ -155,7 +155,7 @@ function FlowCard({
 
   return (
     <Card className="lg:col-span-3">
-      <CardContent className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:gap-10">
+      <CardContent className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:gap-10">
         <Stat
           size="lg"
           label={settled ? "공동저축" : "공동저축 계획"}

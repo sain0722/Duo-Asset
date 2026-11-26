@@ -79,7 +79,7 @@ export function GoalsPage() {
             value={<Money amount={view.freeLiquid} />}
             sub={basis && basisText(basis)}
           />
-          <dl className="grid gap-2.5 border-t pt-4 text-sm sm:grid-cols-2 sm:gap-6">
+          <dl className="grid grid-cols-1 gap-2.5 border-t pt-4 text-sm sm:grid-cols-2 sm:gap-6">
             <div className="flex items-center justify-between gap-3 sm:flex-col sm:items-start sm:gap-1">
               <dt className="flex items-center gap-1 text-muted-foreground">
                 가용자산
@@ -114,7 +114,7 @@ export function GoalsPage() {
             </h2>
             <p className="text-caption text-muted-foreground">위에 있는 목표부터 자산을 배정합니다</p>
           </div>
-          <div className="grid gap-4 sm:gap-5 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
             {view.progress.map((progress, index) => {
               const goal = goalById.get(progress.goalId);
               if (!goal) return null;

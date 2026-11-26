@@ -6,6 +6,7 @@ import { actual, asset, assetSnap, liability, liabilitySnap, member, monthInput,
 import {
   assetValueChange,
   balanceJump,
+  suspiciousBalances,
   balanceWithPlannedSaving,
   checklist,
   planComparison,
@@ -256,6 +257,23 @@ describe("입력 실수 안내", () => {
     expect(balanceJump(5_000_000, 0)).toBeNull();
     expect(balanceJump(0, 5_000_000)).toBeNull();
     expect(balanceJump(1_000_000, 4_999_999)).toBeNull(); // 5배 미만
+  });
+
+  it("크게 달라진 잔액을 자산·부채에서 모은다 (확인한 값만, 기준 월 제외)", () => {
+    const report = {
+      isBaseline: false,
+      assetLines: [
+        { name: "통장", confirmed: true, openValue: 11_400_000, value: 1_267_000 },
+        { name: "미확인", confirmed: false, openValue: 11_400_000, value: 11_400_000 },
+        { name: "적금", confirmed: true, openValue: 5_000_000, value: 5_500_000 },
+      ],
+      liabilityLines: [{ name: "대출", confirmed: true, openBalance: 30_000_000, balance: 300_000_000 }],
+    } as unknown as Parameters<typeof suspiciousBalances>[0];
+    expect(suspiciousBalances(report)).toEqual([
+      { section: "assets", name: "통장", jump: "drop" },
+      { section: "liabilities", name: "대출", jump: "rise" },
+    ]);
+    expect(suspiciousBalances({ ...report, isBaseline: true })).toEqual([]);
   });
 
   it("주머니 소비가 계획의 200%를 넘으면 그 주머니를 돌려준다", () => {

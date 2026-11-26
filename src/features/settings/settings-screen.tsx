@@ -13,7 +13,7 @@ export function SettingsScreen() {
   return (
     <PageContainer className="max-w-5xl">
       <PageHeader title="설정" />
-      <div className="grid gap-4 sm:gap-5 lg:grid-cols-2 lg:items-start">
+      <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2 lg:items-start">
         <div className="flex flex-col gap-4 sm:gap-5">
           <HouseholdSection />
           <AccountSection />

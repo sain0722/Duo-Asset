@@ -221,4 +221,30 @@ describe("scheduledRepayment", () => {
     const l = liability({ kind: "interest_only", monthly_payment: 100_000 });
     expect(scheduledRepayment(l, "2026-10", 5_000_000)).toBe(0);
   });
+
+  it("원리금균등: 만기가 가까워도(남은 회차 2~3회) 정확히 맞는 값을 찾는다", () => {
+    // 무이자 12개월, 2025-12 시작 → 2026-10 은 11번째 회차. 월말 잔액 100만 원이면 월초 200만 원에서 100만 원을 갚았다
+    const zero = liability({ kind: "amortized", original_principal: 12_000_000, annual_rate: 0, term_months: 12, start_month: "2025-12" });
+    expect(scheduledRepayment(zero, "2026-10", 1_000_000)).toBe(1_000_000);
+
+    for (const [rate, start] of [
+      [0, "2026-01"], // 2026-10 이 10번째, 남은 회차 3
+      [5, "2026-01"],
+      [5, "2025-12"], // 남은 회차 2
+    ] as const) {
+      const l = liability({ kind: "amortized", original_principal: 12_000_000, annual_rate: rate, term_months: 12, start_month: start });
+      const balance = 2_000_000;
+      const repaid = scheduledRepayment(l, "2026-10", balance);
+      expect(repaid).not.toBeNull();
+      // 그 월초 잔액으로 계획이 잡는 원금과 1원 안에서 같다
+      expect(Math.abs(scheduledPayment(l, "2026-10", balance + repaid!).principal - repaid!)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("원금균등·만기일시", () => {
+    const equal = liability({ kind: "equal_principal", original_principal: 12_000_000, annual_rate: 3, term_months: 24, start_month: "2026-01" });
+    expect(scheduledRepayment(equal, "2026-10", 7_000_000)).toBe(500_000);
+    const bullet = liability({ kind: "bullet", original_principal: 10_000_000, annual_rate: 3, term_months: 24, start_month: "2026-01" });
+    expect(scheduledRepayment(bullet, "2026-10", 10_000_000)).toBe(0);
+  });
 });
