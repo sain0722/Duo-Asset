@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { formatMonthOnly } from "@/lib/format";
 import { addMonths, currentYm } from "@/lib/month";
 
-import { createAccount, login, newDeviceContext, removeAccounts, toast, type TestAccount } from "./helpers";
+import { createAccount, loadHousehold, login, newDeviceContext, removeAccounts, toast, type TestAccount } from "./helpers";
 
 test.describe("온보딩", () => {
   const accounts: TestAccount[] = [];
@@ -39,6 +39,7 @@ test.describe("온보딩", () => {
       await page.getByLabel("가구 이름").fill("가람·누리네");
       await page.getByLabel("내 이름").fill("가람");
       await page.getByLabel("배우자 이름").fill("누리");
+      await expect(page.getByText("배우자 계정은 관리자가 따로 발급해야 합니다.", { exact: false })).toBeVisible();
       await page.getByLabel(/^배우자 로그인 이메일/).fill(partner.email);
       await page.getByRole("button", { name: "가구 만들기" }).click();
 
@@ -60,6 +61,15 @@ test.describe("온보딩", () => {
       await expect(partnerPage).toHaveURL(/\/$/);
       await expect(toast(partnerPage, "가람님 가구에 연결되었습니다")).toBeVisible();
       await context.close();
+    });
+
+    await test.step("두 계정이 같은 가구를 보고, 기준 월은 지난달이다", async () => {
+      const mine = await loadHousehold(owner.email, owner.password);
+      const theirs = await loadHousehold(partner.email, partner.password);
+      expect(theirs.household.id).toBe(mine.household.id);
+      expect(mine.members.map((member) => member.name)).toEqual(["가람", "누리"]);
+      expect(theirs.me.name).toBe("누리");
+      expect(mine.months.map((month) => month.month)).toEqual([addMonths(currentYm(), -1)]);
     });
   });
 });

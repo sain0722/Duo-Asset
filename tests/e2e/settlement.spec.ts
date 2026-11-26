@@ -1,13 +1,13 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-import { findMonth, reportFor } from "@/lib/data/derive";
+import { findMonth, planForMonth, reportFor } from "@/lib/data/derive";
 import type { HouseholdData } from "@/lib/data/types";
 import { ASSET_KINDS } from "@/lib/finance";
 import { suggestInputs } from "@/lib/finance/suggest";
 import { JOINT, type MonthReport, type Ym } from "@/lib/finance/types";
-import { formatCompactWon, formatMonthOnly, formatWon } from "@/lib/format";
+import { formatCompactWon, formatMonthOnly, formatPercent, formatWon } from "@/lib/format";
 import { addMonths, currentYm } from "@/lib/month";
-import { checklist, remainingAfter, suggestionRows, type CheckItem } from "@/features/settlement/model";
+import { BALANCE_JUMP_HINT, checklist, planComparison, rowIdOf, pocketUsage, remainingAfter, savingsAchievement, suggestionRows, type CheckItem } from "@/features/settlement/model";
 
 import type { SeedResult } from "../../scripts/seed-demo";
 import { definitionValue, isMobile, loadHousehold, loginAs, removeHousehold, seedOwnHousehold, statValue, toast } from "./helpers";
@@ -43,6 +43,27 @@ test("정산: 한 번에 확인 → 잔액 입력 → 결과 대조 → 마감 �
   await page.goto("/settlement");
   await expect(page.getByRole("heading", { level: 1, name: "월 정산" })).toBeVisible();
   await expect(page.getByText(`${label} 정산 진행`)).toBeVisible();
+
+  await test.step("미확인은 0원으로 보이지 않는다 (결과는 정산 전, 이력도 정산 전)", async () => {
+    const data = await load();
+    const draft = reportFor(data, findMonth(data, WORKING)!);
+    expect(draft.complete).toBe(false);
+    const result = page.locator("#section-result");
+    await expect(result.getByText("정산 전", { exact: true })).toBeVisible();
+    await expect(result.getByText(/^미확인 \d+건을 확인하면 결과가 계산됩니다\.$/)).toBeVisible();
+    await expect(result.getByText("실제 저축액", { exact: true })).toHaveCount(0);
+    await expect(result.getByText("0원", { exact: true })).toHaveCount(0);
+    // 아직 확인하지 않은 잔액 칸은 비어 있다 (0 이나 계획값으로 채우지 않는다)
+    const unconfirmed = draft.assetLines.find((line) => !line.confirmed && ASSET_KINDS[line.kind].tracking !== "valuation")!;
+    expect(unconfirmed).toBeDefined();
+    await expect(page.getByRole("textbox", { name: `${unconfirmed.name} 잔액`, exact: true })).toHaveValue("");
+
+    const entry = await historyEntry(page, mobile, label);
+    await expect(entry).toContainText("정산 전");
+    await expect(entry).toContainText("수입·소비는 정산 후 표시");
+    await expect(entry).not.toContainText("수입 0");
+    if (mobile) await page.getByRole("button", { name: /^정산 이력/ }).click();
+  });
 
   await test.step("예정대로 한 번에 확인", async () => {
     await confirmSuggestions(page, await load(), WORKING);
@@ -126,13 +147,69 @@ test("정산: 한 번에 확인 → 잔액 입력 → 결과 대조 → 마감 �
     await expect(page.getByText("모두 확인했어요.", { exact: true })).toBeVisible();
     expect(reportFor(await load(), findMonth(await load(), THIS_MONTH)!).complete).toBe(true);
 
+    // 자릿수 실수(전월의 1/10)는 확인한 줄 아래에 안내하고, 고치면 사라진다
+    const current = reportFor(await load(), findMonth(await load(), THIS_MONTH)!);
+    const cash = current.assetLines.find((line) => ASSET_KINDS[line.kind].tracking !== "valuation" && line.openValue >= 2_000_000)!;
+    expect(cash).toBeDefined();
+    const row = page.locator(`[id="${rowIdOf("asset", cash.assetId)}"]`);
+    await row.getByRole("button", { name: `${cash.name} 수정` }).click();
+    const balance = row.getByRole("textbox", { name: `${cash.name} 잔액`, exact: true });
+    await balance.fill(String(Math.round(cash.openValue / 10)));
+    await balance.press("Enter");
+    await expect(row.getByText(BALANCE_JUMP_HINT.drop)).toBeVisible();
+    await row.getByRole("button", { name: `${cash.name} 수정` }).click();
+    await balance.fill(String(cash.value));
+    await balance.press("Enter");
+    await expect(row.getByRole("button", { name: `${cash.name} 수정` })).toBeVisible();
+    await expect(row.getByText(BALANCE_JUMP_HINT.drop)).toHaveCount(0);
+    expect(reportFor(await load(), findMonth(await load(), THIS_MONTH)!).assetLines.find((line) => line.assetId === cash.assetId)!.value).toBe(cash.value);
+
     await expect(closeButton(page, nextLabel)).toBeDisabled();
     const after = formatMonthOnly(NEXT_OF_THIS);
-    await expect(
-      mobile
-        ? page.locator(".fixed").getByText(`${after} 1일부터 마감할 수 있어요`)
-        : page.getByText(`${nextLabel}이 끝난 뒤 ${after} 1일부터 마감할 수 있습니다. 입력은 미리 해 두세요.`),
-    ).toBeVisible();
+    await expect(closeButton(page, nextLabel)).toHaveCount(1);
+    if (mobile) {
+      await expect(page.locator(".fixed").getByText(`${after} 1일부터 마감할 수 있어요`)).toBeVisible();
+    } else {
+      // PC: 마감 버튼과 이유는 왼쪽의 고정 진행 카드에 있다
+      const progress = page.getByRole("region", { name: `${nextLabel} 정산 진행` });
+      await expect(progress.getByRole("button", { name: `${nextLabel} 마감`, exact: true })).toBeDisabled();
+      await expect(progress.getByText(`${nextLabel}이 끝난 뒤 ${after} 1일부터 마감할 수 있습니다. 입력은 미리 해 두세요.`)).toBeVisible();
+    }
+  });
+
+  await test.step("계획 설정을 바꿔도 마감한 달은 마감 당시 결과를 보여 준다 (설정 화면 · 홈)", async () => {
+    const before = await load();
+    const living = before.planItems.find((item) => item.name === "공동생활비" && item.member_id === null)!;
+    const raised = living.amount + 600_000;
+    await page.goto("/plan");
+    await expect(page.getByRole("heading", { level: 1, name: "월급·배분" })).toBeVisible();
+    await page.getByRole("button", { name: /^공동생활비/ }).first().click();
+    const dialog = page.getByRole("dialog", { name: "고정지출 수정" });
+    await dialog.getByLabel("금액", { exact: true }).fill(String(raised));
+    // 마감한 달까지 거슬러 바꾸는 쪽(처음부터 수정)을 골라도 마감한 달은 그대로여야 한다
+    await dialog.getByRole("radio", { name: "처음부터 수정" }).click();
+    await dialog.getByRole("button", { name: "저장" }).click();
+    await expect(toast(page, "저장했습니다")).toBeVisible();
+    await expect(dialog).toBeHidden();
+
+    const after = await load();
+    expect(after.planItems.find((item) => item.id === living.id)!.amount).toBe(raised);
+    // 지금 설정(열린 달)의 계획 소비는 늘었다 → 마감한 달이 동결값을 보여 주는지 구별된다
+    const planNow = planForMonth(after, THIS_MONTH).totals;
+    expect(planNow.consumption).toBe(planForMonth(before, THIS_MONTH).totals.consumption + 600_000);
+    expect(reportFor(after, findMonth(after, WORKING)!)).toEqual(report);
+
+    await page.goto(`/settlement?month=${WORKING}`);
+    await expect(page.getByRole("heading", { name: `${label} 결과` })).toBeVisible();
+    await expectReport(page.locator("main"), report);
+
+    await page.goto("/");
+    const card = page.locator('[data-slot="card"]').filter({ has: page.getByText(`${label} 정산 결과`, { exact: true }) });
+    await expect(statValue(card, "실제 저축액")).toHaveText(formatWon(report.savings));
+    await expect(card.locator('[data-slot="stat"]').first()).toContainText(`계획 ${formatWon(report.plan.savings)}`);
+    // 이번 달 계획 카드는 바뀐 설정을 따른다
+    await expect(statValue(page, "계획 저축액")).toHaveText(formatCompactWon(planNow.savings));
+    expect(planNow.savings).not.toBe(report.plan.savings);
   });
 });
 
@@ -154,7 +231,18 @@ async function confirmSuggestions(page: Page, data: HouseholdData, ym: Ym) {
   await page.getByRole("button", { name: `예정대로 ${rows.length}건 한 번에 확인` }).click();
   const dialog = page.getByRole("dialog", { name: `예정대로 ${rows.length}건 확인` });
   await expect(dialog).toBeVisible();
-  for (const row of rows) await expect(dialog.getByText(row.name, { exact: true }).first()).toBeVisible();
+  // 줄마다 무엇을 · 얼마로 · 왜 (앱과 같은 suggestionRows 로 만든 기대값)
+  const lines = dialog.getByRole("listitem");
+  await expect(lines).toHaveCount(rows.length);
+  for (const [index, row] of rows.entries()) {
+    const line = lines.nth(index);
+    await expect(line).toContainText(row.name);
+    await expect(line).toContainText(row.reason);
+    await expect(line).toContainText(formatWon(row.amount));
+  }
+  // 공용통장 납입은 "하늘 → 공용통장" 처럼 보낸 사람으로 표시한다
+  for (const row of rows.filter((candidate) => candidate.section === "transfers")) expect(row.name).toMatch(/^\S+ → 공용통장$/);
+  await expect(dialog).not.toContainText("입금 입금");
   await dialog.getByRole("button", { name: `${rows.length}건 확인` }).click();
 
   await expect(toast(page, `${rows.length}건을 예정대로 확인했습니다`)).toBeVisible();
@@ -215,21 +303,50 @@ function progressText(page: Page, total: number): Locator {
 
 /** 결과 카드의 숫자가 report 와 같다 (화면 문자열을 format 함수 결과와 맞춘다) */
 async function expectReport(scope: Locator, report: MonthReport) {
-  await expect(statValue(scope, "저축액")).toHaveText(formatWon(report.savings));
+  const page = scope.page();
+  const savings = scope.locator('[data-slot="stat"]').filter({ has: page.locator("span", { hasText: /^실제 저축액$/ }) });
+  await expect(savings.locator('[data-slot="money"]').first()).toHaveText(formatWon(report.savings));
+  // 저축률과 계획 대비 달성률
+  expect(report.savingsRate).not.toBeNull();
+  await expect(savings).toContainText(`저축률 ${formatPercent(report.savingsRate!)}`);
+  const achievement = savingsAchievement(report);
+  if (achievement !== null) await expect(savings).toContainText(`계획 대비 ${formatPercent(achievement)}`);
+
   await expect(definitionValue(scope, "총수입")).toHaveText(formatWon(report.income));
   await expect(definitionValue(scope, "소비지출")).toHaveText(formatWon(report.consumption));
   await expect(definitionValue(scope, "원금 상환액")).toHaveText(formatWon(report.principalRepaid));
   await expect(definitionValue(scope, "투자 평가손익")).toHaveText(formatWon(report.investmentGain, { sign: true }));
   await expect(definitionValue(scope, "기타 평가 변동")).toHaveText(formatWon(report.otherValuation, { sign: true }));
-  // 순자산: 변화량과 월말 값
+  // 순자산: 변화량과 월초 → 월말 값
   const netWorth = scope
     .locator("div")
-    .filter({ has: scope.page().getByText("순자산 변화", { exact: true }) })
+    .filter({ has: page.getByText("순자산 변화", { exact: true }) })
     .filter({ hasText: "에서" })
     .last();
-  await expect(netWorth).toContainText(formatWon(Math.abs(report.netWorthChange)));
+  await expect(netWorth.locator('[data-slot="delta"]')).toHaveText(
+    `${report.netWorthChange > 0 ? "증가" : report.netWorthChange < 0 ? "감소" : ""}${formatWon(Math.abs(report.netWorthChange))}`,
+  );
   await expect(netWorth).toContainText(formatCompactWon(report.closing.netWorth));
   await expect(netWorth).toContainText(formatCompactWon(report.opening.netWorth));
+
+  // 계획 대비 실적 (마감한 달은 동결된 계획 값)
+  const comparison = scope.locator("section").filter({ has: page.getByRole("heading", { name: "계획 대비 실적" }) });
+  for (const row of planComparison(report)) {
+    const item = comparison.getByRole("listitem").filter({ has: page.getByText(row.label, { exact: true }) });
+    await expect(item, row.label).toContainText(`계획 ${formatCompactWon(row.planned)}`);
+    await expect(item.locator('[data-slot="money"]').last(), row.label).toHaveText(formatCompactWon(row.actual));
+  }
+
+  // 주머니별 소비
+  const pockets = scope.locator("section").filter({ has: page.getByRole("heading", { name: "주머니별 소비" }) });
+  await expect(pockets.getByRole("listitem")).toHaveCount(report.pockets.length);
+  for (const [index, pocket] of report.pockets.entries()) {
+    const item = pockets.getByRole("listitem").nth(index);
+    await expect(item.locator('[data-slot="money"]').first(), pocket.name).toHaveText(formatWon(pocket.consumption));
+    await expect(item, pocket.name).toContainText(`계획 ${formatCompactWon(pocket.plannedConsumption)}`);
+    const usage = pocketUsage(pocket);
+    if (usage !== null) await expect(item, pocket.name).toContainText(formatPercent(usage));
+  }
 }
 
 /** 화면 크기에 따라 보이는 쪽(모바일 하단 바 / PC 결과 카드)의 마감 버튼 */
@@ -238,6 +355,8 @@ function closeButton(page: Page, label: string): Locator {
 }
 
 async function closeMonthOnScreen(page: Page, label: string) {
+  // 화면마다 보이는 마감 버튼은 하나뿐이다 (PC: 왼쪽 진행 카드, 모바일: 하단 고정 바)
+  await expect(closeButton(page, label)).toHaveCount(1);
   await expect(closeButton(page, label)).toBeEnabled();
   await closeButton(page, label).click();
   const dialog = page.getByRole("alertdialog", { name: `${label} 정산을 마감할까요?` });

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { SCREENS, loginAs, openScreen, seedFor } from "./helpers";
+import { SCREENS, createAccount, login, loginAs, openScreen, removeAccounts, seedFor } from "./helpers";
 
 /** 서비스 워커가 캐시해도 되는 것: 해시가 붙은 빌드 자산과 앱 아이콘뿐 (public/sw.js) */
 const CACHEABLE = /^\/(_next\/static\/|icons\/|favicon\.ico$|icon\.svg$|apple-icon\.png$)/;
@@ -125,6 +125,96 @@ test.describe("보안", () => {
     expect(problems).toEqual([]);
   });
 });
+
+test.describe("금융 데이터 보관", () => {
+  test("웹 스토리지·IndexedDB·캐시·주소창에 금융 데이터가 남지 않는다", async ({ page }, testInfo) => {
+    const seed = seedFor(testInfo.project.name);
+    const urls: string[] = [];
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) urls.push(frame.url());
+    });
+
+    await loginAs(page, seed);
+    for (const screen of SCREENS) await openScreen(page, screen.path, screen.heading);
+    await page.goto("/assets");
+    await page.locator("main").getByRole("link").filter({ hasText: "하늘 급여통장" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "하늘 급여통장" })).toBeVisible();
+    await openScreen(page, "/settlement", "월 정산");
+    await page.getByRole("button", { name: "이전 달" }).click();
+    await expect(page).toHaveURL(/month=\d{4}-\d{2}$/);
+
+    // 주소에는 화면 경로·자산 id·달(YYYY-MM)만 있다. 금액·이름은 없다
+    expect(urls.length).toBeGreaterThan(SCREENS.length);
+    for (const url of urls) {
+      const parsed = new URL(url);
+      expect(parsed.pathname, url).toMatch(/^\/(|login|plan|joint|settlement|assets|assets\/[0-9a-f-]{36}|liabilities|goals|simulation|settings)$/);
+      for (const [key, value] of parsed.searchParams) {
+        expect(key, url).toBe("month");
+        expect(value, url).toMatch(/^\d{4}-\d{2}$/);
+      }
+      expect(parsed.hash, url).toBe("");
+    }
+
+    const stored = await browserStorage(page);
+    expect(stored).not.toMatch(FINANCIAL);
+    expect(stored).not.toMatch(/access_token|refresh_token/);
+
+    // 로그아웃하면 메모리의 가구 데이터도 사라진다: 같은 탭에서 다른(가구 없는) 계정으로 로그인해도 이전 가구가 보이지 않는다
+    const stranger = await createAccount("e2e-after-logout");
+    try {
+      await page.goto("/settings");
+      await page.getByRole("button", { name: "로그아웃" }).click();
+      await expect(page).toHaveURL(/\/login$/);
+      expect(await page.locator("body").innerText()).not.toMatch(FINANCIAL);
+      expect(await browserStorage(page)).not.toMatch(FINANCIAL);
+
+      await login(page, stranger.email, stranger.password, /\/onboarding$/);
+      await expect(page.getByRole("heading", { level: 1, name: /가구를\s*만들어 볼까요/ })).toBeVisible();
+      expect(await page.locator("body").innerText()).not.toMatch(FINANCIAL);
+      for (const path of ["/", "/assets", "/settlement"]) {
+        await page.goto(path);
+        await expect(page, path).toHaveURL(/\/onboarding$/);
+        expect(await page.locator("body").innerText(), path).not.toMatch(FINANCIAL);
+      }
+    } finally {
+      await removeAccounts([stranger]);
+    }
+  });
+});
+
+/** 시드 가구의 이름·자산 이름·금액 (화면 밖 저장소에 있으면 안 되는 것) */
+const FINANCIAL = /하늘·바다네|하늘 급여통장|바다 급여통장|비상금 예금|자동차 할부|4,?300,?000|3,?100,?000/;
+
+/** localStorage · sessionStorage · IndexedDB 의 모든 내용과 Cache Storage 의 URL */
+function browserStorage(page: Page): Promise<string> {
+  return page.evaluate(async () => {
+    const dump = (storage: Storage) =>
+      Array.from({ length: storage.length }, (_, i) => storage.key(i)!).map((key) => `${key}=${storage.getItem(key)}`);
+    const parts: string[] = [...dump(localStorage), ...dump(sessionStorage)];
+    for (const info of await indexedDB.databases()) {
+      if (!info.name) continue;
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(info.name!);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      for (const store of Array.from(db.objectStoreNames)) {
+        const values = await new Promise<unknown[]>((resolve, reject) => {
+          const request = db.transaction(store, "readonly").objectStore(store).getAll();
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        parts.push(`${info.name}/${store}=${JSON.stringify(values)}`);
+      }
+      db.close();
+    }
+    for (const name of await caches.keys()) {
+      const cache = await caches.open(name);
+      for (const request of await cache.keys()) parts.push(`cache:${request.url}`);
+    }
+    return parts.join("\n");
+  });
+}
 
 /** Cache Storage 에 저장된 모든 요청 URL */
 function cacheEntries(page: Page): Promise<string[]> {

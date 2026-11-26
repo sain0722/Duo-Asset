@@ -125,5 +125,10 @@ test("다크 모드에서도 렌더링된다", async ({ browser }, testInfo) => 
     expect(colors.text, screen.path).not.toBe(colors.body);
     expect(colors.body, screen.path).not.toBe(lightBackground);
   }
+  if (isMobile(testInfo)) {
+    // 가장 좁은 대상 폭(360px)에서도 다크 모드로 다시 다닌다
+    await page.setViewportSize({ width: 360, height: 740 });
+    await walkScreens(page, "dark 360px");
+  }
   await dark.close();
 });

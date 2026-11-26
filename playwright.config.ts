@@ -16,6 +16,7 @@ export default defineConfig({
   workers: 1,
   reporter: [["list"]],
   globalSetup: "./tests/e2e/global-setup.ts",
+  globalTeardown: "./tests/e2e/global-teardown.ts",
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
     locale: "ko-KR",
