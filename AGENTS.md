@@ -39,6 +39,7 @@ npm run seed         # 로컬 Supabase 에 가상의 부부 데이터 생성 (�
 - 계산은 `src/lib/finance`의 순수 함수에만 둔다. 컴포넌트 안에서 합계·비율을 직접 계산하지 않는다. React·Supabase를 `lib/finance`에서 import하지 않는다.
 - 규칙을 바꾸면 `docs/finance-rules.md`와 테스트를 함께 고친다. 4절의 항등식 테스트는 항상 통과해야 한다.
 - 계좌 간 이동·공용통장 납입·적금 납입을 지출로 집계하지 않는다. 비현금 복지를 수입·자산에 넣지 않는다.
+- 실제 값(`month_entries`)은 계획 항목 id로 계획 줄과 짝을 맞춘다. 계획 항목을 나누거나 바꿀 때는 열린 달의 실제 값이 어느 항목을 가리키는지 함께 본다(어긋나면 같은 수입이 두 번 집계된다). 마감했다가 다시 연 달은 계획 줄이 동결돼 있으므로 건드리지 않는다.
 - "미확인"(값 없음)과 0원을 구분한다. 미확인을 0이나 계획값으로 조용히 채우지 않는다.
 - 마감된 달은 `months.summary`만 보여 준다. 현재 설정으로 다시 계산하지 않는다.
 - 미확인 항목이 남은 달(`report.complete === false`)의 수입·소비·저축은 잠정값이다. 결과처럼 보여 주지 말고 "정산 전"으로 표시한다.
@@ -49,7 +50,7 @@ npm run seed         # 로컬 Supabase 에 가상의 부부 데이터 생성 (�
 - DB 접근은 `src/lib/data`를 거친다. 컴포넌트에서 `supabase.from(...)`을 직접 호출하지 않는다.
 - 수정은 읽었던 `version`을 함께 보낸다(`updateRow`). 충돌(`ConflictError`)은 사용자에게 알리고 다시 읽는다.
 - 가구 데이터(`HouseholdData`)는 불변으로 다룬다. 값이 바뀌면 재조회로 새 객체를 받는다(파생 계산 캐시가 객체 단위다).
-- 화면에서 쓸 값은 `src/lib/data/derive.ts`(reportFor, planForMonth, currentPosition, history …)에서 가져온다.
+- 화면에서 쓸 값은 `src/lib/data/derive.ts`(reportFor, planForMonth, currentPosition, positionView, history …)에서 가져온다. 잔액을 보여 줄 때는 `positionView`의 기준 표기("○월 말 마감 기준" 등)를 함께 쓴다.
 - 새 테이블에는 `household_id`, RLS 정책, 명시적 `grant`를 반드시 넣고 `tests/db`에 접근 권한 테스트를 추가한다.
 - 금융 데이터를 `localStorage`·IndexedDB·서비스 워커 캐시·URL·로그에 남기지 않는다.
 - 비밀키(`service_role`, `sb_secret_*`)를 클라이언트 코드나 `NEXT_PUBLIC_*`에 넣지 않는다. `.env*`는 커밋하지 않는다.
@@ -69,6 +70,6 @@ npm run seed         # 로컬 Supabase 에 가상의 부부 데이터 생성 (�
 - 기본 컴포넌트는 `src/components/ui`, 공용 조합은 `src/components`, 화면 전용은 `src/features/<기능>`.
 - `(app)` 아래 `page.tsx`는 `metadata`와 `export const instant = false`만 두고 본문은 features 의 클라이언트 컴포넌트를 렌더링한다.
 - 색·간격·반경은 `globals.css`의 토큰만 쓴다. 임의의 hex 색을 쓰지 않는다. 라이트/다크 모두 확인한다.
-- 모바일(360px)에서 먼저 확인한다. 가로 스크롤이 생기면 안 된다. 터치 대상은 44px 이상.
+- 모바일(360px)에서 먼저 확인한다. 가로 스크롤이 생기면 안 된다(긴 이름·큰 금액으로 확인). 반응형 그리드에는 `grid-cols-1`을 명시한다. 터치 대상은 44px 이상.
 - 금액에는 `tabular-nums`를 쓴다. 숫자가 주인공이고 장식은 최소화한다.
 - 지표에는 정의를 볼 수 있는 도움말(`InfoTip`)을 붙인다. 문구는 `docs/finance-rules.md`와 일치시킨다.
