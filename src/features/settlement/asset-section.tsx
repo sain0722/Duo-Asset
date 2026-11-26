@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, Plus, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -16,7 +16,16 @@ import { JOINT } from "@/lib/finance/types";
 import { formatCompactWon } from "@/lib/format";
 
 import { clearAssetLine, hasOpeningValues, saveAssetLine, saveInputs } from "./actions";
-import { assetValueChange, balanceWithPlannedSaving, plannedSavingsByAsset, principalAfter, progressOf, rowIdOf } from "./model";
+import {
+  assetValueChange,
+  BALANCE_JUMP_HINT,
+  balanceJump,
+  balanceWithPlannedSaving,
+  plannedSavingsByAsset,
+  principalAfter,
+  progressOf,
+  rowIdOf,
+} from "./model";
 import { useOpenMonth } from "./month-context";
 import { ConfirmedValue, EditGroup, InputWithQuick, PendingMark, QuickButton, Row, RowActions, RowHead } from "./rows";
 import { useSaver } from "./save-status";
@@ -104,6 +113,8 @@ function AssetRow({ line, plannedSaving }: { line: AssetLine; plannedSaving: Won
   const pending = isPending(key);
   const baseline = report.isBaseline;
   const valuation = ASSET_KINDS[line.kind].tracking === "valuation";
+  // 자동차·부동산 같은 평가형 자산은 돈을 넣고 빼는 계좌가 아니다: 순입금은 기본 0, 필요할 때만 연다
+  const investment = ASSET_KINDS[line.kind].investment;
   const archived = data.assets.find((asset) => asset.id === line.assetId)?.is_active === false;
 
   const [editing, setEditing] = useState(false);
@@ -112,6 +123,8 @@ function AssetRow({ line, plannedSaving }: { line: AssetLine; plannedSaving: Won
   // 평가형: 이번 달 순입금(기본은 연결된 저축 계획) · 기준 월: 투자 원금(비우면 평가금액과 같다)
   const [net, setNet] = useState<Won | null>(line.confirmed ? line.contributed : (plannedSaving ?? 0));
   const [principal, setPrincipal] = useState<Won | null>(line.confirmed ? line.principal : null);
+  const [showNet, setShowNet] = useState(investment || (net ?? 0) !== 0);
+  const jump = line.confirmed && !baseline ? balanceJump(line.openValue, line.value) : null;
 
   function persist(nextValue: Won, nextPrincipal: Won) {
     if (line.confirmed && nextValue === line.value && nextPrincipal === line.principal) {
@@ -146,6 +159,17 @@ function AssetRow({ line, plannedSaving }: { line: AssetLine; plannedSaving: Won
     >
       예정대로 {formatCompactWon(plannedSaving!, { sign: true }).replace(/\s?원$/, "")}
     </QuickButton>
+  );
+
+  const balanceInput = (
+    <MoneyInput
+      value={value}
+      onChange={setValue}
+      placeholder={baseline ? "잔액" : "이번 달 잔액"}
+      aria-label={`${line.name} 잔액`}
+      disabled={pending}
+      autoFocus={editing}
+    />
   );
 
   return (
@@ -186,7 +210,26 @@ function AssetRow({ line, plannedSaving }: { line: AssetLine; plannedSaving: Won
       )}
       {line.confirmed && !editing && valuation && !baseline && (
         <p className="mt-0.5 text-caption text-muted-foreground">
-          순입금 <Money amount={line.contributed} sign compact /> · 평가손익 <Money amount={line.gain} sign compact />
+          {investment ? (
+            <>
+              순입금 <Money amount={line.contributed} sign compact /> · 평가손익 <Money amount={line.gain} sign compact />
+            </>
+          ) : (
+            <>
+              {line.contributed !== 0 && (
+                <>
+                  순입금 <Money amount={line.contributed} sign compact /> ·{" "}
+                </>
+              )}
+              평가 변동 <Money amount={line.gain} sign compact />
+            </>
+          )}
+        </p>
+      )}
+      {jump && !editing && (
+        <p className="mt-1 flex gap-1.5 text-caption font-medium text-warning-foreground">
+          <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+          {BALANCE_JUMP_HINT[jump]}
         </p>
       )}
       {showEditor && (
@@ -205,29 +248,31 @@ function AssetRow({ line, plannedSaving }: { line: AssetLine; plannedSaving: Won
                 <LabeledInput label="투자 원금" tip>
                   <MoneyInput value={principal} onChange={setPrincipal} allowNegative placeholder="비우면 평가금액" aria-label={`${line.name} 투자 원금`} disabled={pending} />
                 </LabeledInput>
-              ) : (
+              ) : showNet ? (
                 <LabeledInput label="이번 달 순입금" hint="넣은 돈 − 뺀 돈" tip>
                   <MoneyInput value={net} onChange={setNet} allowNegative aria-label={`${line.name} 이번 달 순입금`} disabled={pending} />
                 </LabeledInput>
-              )}
+              ) : null}
+            </div>
+          ) : hasPlan && !baseline ? (
+            // 저축 계획이 있는 잔액형: 두 빠른 확인 버튼을 나란히 둔다 (좁은 화면에서는 입력 칸 아래 한 줄)
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+              <div className="min-w-0 sm:flex-1">{balanceInput}</div>
+              <div className="grid grid-cols-2 gap-2 sm:flex">
+                {planButton(true)}
+                {keepButton(true)}
+              </div>
             </div>
           ) : (
-            <InputWithQuick
-              input={
-                <MoneyInput
-                  value={value}
-                  onChange={setValue}
-                  placeholder={baseline ? "잔액" : "이번 달 잔액"}
-                  aria-label={`${line.name} 잔액`}
-                  disabled={pending}
-                  autoFocus={editing}
-                />
-              }
-              quick={!baseline && (hasPlan ? planButton(true) : keepButton(true))}
-            />
+            <InputWithQuick input={balanceInput} quick={!baseline && keepButton(true)} />
           )}
           <RowActions>
-            {!baseline && !valuation && hasPlan && keepButton(false)}
+            {valuation && !baseline && !showNet && (
+              <QuickButton variant="ghost" disabled={pending} className="-ml-2 text-muted-foreground" onClick={() => setShowNet(true)}>
+                <Plus aria-hidden />
+                순입금 입력
+              </QuickButton>
+            )}
             {editing && canClear && (
               <QuickButton variant="ghost" disabled={pending} onClick={() => void save(key, () => clearAssetLine(ctx, line))}>
                 확인 취소

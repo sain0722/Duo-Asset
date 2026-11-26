@@ -1,7 +1,8 @@
 "use client";
 
-import { ArrowDown, CalendarClock, Check } from "lucide-react";
+import { ArrowDown, CalendarClock, Check, TriangleAlert } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -15,7 +16,7 @@ import { EMPTY_MONTH_DATA, type HouseholdData } from "@/lib/data/types";
 import { percentOf, suggestInputs } from "@/lib/finance";
 import type { MonthReport, MonthRow, Ym } from "@/lib/finance/types";
 import { JOINT } from "@/lib/finance/types";
-import { formatMonthOnly } from "@/lib/format";
+import { formatMonthOnly, formatPercent } from "@/lib/format";
 import { addMonths, compareYm, currentYm } from "@/lib/month";
 import { cn } from "@/lib/utils";
 
@@ -24,13 +25,29 @@ import { BulkConfirm } from "./bulk-confirm";
 import { ExpenseSection } from "./expense-section";
 import { IncomeSection } from "./income-section";
 import { LiabilitySection } from "./liability-section";
-import { checklist, progressOf, remainingAfter, suggestionRows, type CheckItem, type SectionId } from "./model";
+import {
+  checklist,
+  overspentPockets,
+  POCKET_OVERSPEND_PERCENT,
+  progressOf,
+  remainingAfter,
+  suggestionRows,
+  type CheckItem,
+  type SectionId,
+} from "./model";
 import { OpenMonthProvider, type OpenMonthContext } from "./month-context";
 import { ResultBody } from "./result-panel";
 import { SaveIndicator, SaverProvider, useSaver } from "./save-status";
 import { TransferSection } from "./transfer-section";
 
-export function OpenMonthView(props: { data: HouseholdData; month: MonthRow; report: MonthReport; onSelectMonth: (ym: Ym) => void }) {
+export function OpenMonthView(props: {
+  data: HouseholdData;
+  month: MonthRow;
+  report: MonthReport;
+  onSelectMonth: (ym: Ym) => void;
+  /** PC 왼쪽 열의 자리. 진행·마감 카드를 여기에 붙여 스크롤 중에도 보이게 한다 */
+  desktopSlot?: HTMLElement | null;
+}) {
   return (
     <SaverProvider>
       <OpenMonthInner {...props} />
@@ -43,11 +60,13 @@ function OpenMonthInner({
   month,
   report,
   onSelectMonth,
+  desktopSlot,
 }: {
   data: HouseholdData;
   month: MonthRow;
   report: MonthReport;
   onSelectMonth: (ym: Ym) => void;
+  desktopSlot?: HTMLElement | null;
 }) {
   const { save } = useSaver();
   const isDesktop = useMediaQuery("(min-width: 64rem)");
@@ -126,6 +145,12 @@ function OpenMonthInner({
     ? `미확인 ${remaining.length}건을 확인하면 마감할 수 있습니다.`
     : !ended
       ? `${label}이 끝난 뒤 ${nextLabel} 1일부터 마감할 수 있습니다. 입력은 미리 해 두세요.`
+      : null;
+  // 자릿수 실수 등으로 소비가 계획을 크게 넘은 주머니. 마감은 막지 않고 알리기만 한다
+  const overspent = overspentPockets(report);
+  const overspendNotice =
+    overspent.length > 0
+      ? `${overspent.map((p) => `${p.name} 소비가 계획 대비 ${formatPercent(p.usage)}`).join(", ")}예요. 잔액을 잘못 입력하지 않았는지 확인해 주세요.`
       : null;
 
   return (
@@ -231,14 +256,9 @@ function OpenMonthInner({
           <CardContent>
             <ResultBody data={data} report={report} remaining={remaining} onJump={jumpToItem} />
           </CardContent>
-          {closable && (
-            <div className="hidden flex-col items-end gap-2 border-t px-6 pt-5 lg:flex">
-              <Button size="lg" disabled={!canCloseNow} onClick={requestClose}>
-                {label} 마감
-              </Button>
-              <p className="text-caption text-muted-foreground">
-                {closeReason ?? "마감하면 결과가 확정되고 다음 달이 열립니다."}
-              </p>
+          {closable && overspendNotice && (
+            <div className="px-5 sm:px-6">
+              <OverspendNotice text={overspendNotice} />
             </div>
           )}
         </Card>
@@ -260,15 +280,120 @@ function OpenMonthInner({
         onGoBlocker={() => blocker && onSelectMonth(blocker.month)}
       />
 
+      {desktopSlot &&
+        createPortal(
+          <DesktopProgress
+            label={label}
+            progress={progress}
+            remaining={remaining.length}
+            complete={report.complete}
+            closable={closable}
+            canCloseNow={canCloseNow}
+            closeReason={closeReason}
+            overspendNotice={overspendNotice}
+            blocker={blocker?.month ?? null}
+            onNext={nextUnconfirmed}
+            onClose={requestClose}
+            onGoBlocker={() => blocker && onSelectMonth(blocker.month)}
+          />,
+          desktopSlot,
+        )}
+
       <ConfirmDialog
         open={confirming}
         onOpenChange={setConfirming}
         title={`${label} 정산을 마감할까요?`}
-        description={`이 달의 결과가 확정되고 ${nextLabel}이 열립니다. 가장 최근에 마감한 달은 다시 열어 고칠 수 있습니다.`}
+        description={
+          overspendNotice
+            ? `${overspendNotice} 마감하면 이 달의 결과가 확정되고 ${nextLabel}이 열립니다.`
+            : `이 달의 결과가 확정되고 ${nextLabel}이 열립니다. 가장 최근에 마감한 달은 다시 열어 고칠 수 있습니다.`
+        }
         confirmLabel="마감"
         onConfirm={handleClose}
       />
     </OpenMonthProvider>
+  );
+}
+
+function OverspendNotice({ text }: { text: string }) {
+  return (
+    <p role="status" className="flex gap-2 rounded-xl bg-warning/12 p-3 text-sm text-warning-foreground">
+      <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+      <span>{text}</span>
+    </p>
+  );
+}
+
+/** PC 왼쪽 열의 진행·마감 카드. 긴 정산 화면을 스크롤하는 동안에도 보인다 (모바일은 하단 고정 바). */
+function DesktopProgress({
+  label,
+  progress,
+  remaining,
+  complete,
+  closable,
+  canCloseNow,
+  closeReason,
+  overspendNotice,
+  blocker,
+  onNext,
+  onClose,
+  onGoBlocker,
+}: {
+  label: string;
+  progress: { done: number; total: number };
+  remaining: number;
+  complete: boolean;
+  closable: boolean;
+  canCloseNow: boolean;
+  closeReason: string | null;
+  overspendNotice: string | null;
+  blocker: Ym | null;
+  onNext?: () => void;
+  onClose: () => void;
+  onGoBlocker: () => void;
+}) {
+  return (
+    <Card aria-label={`${label} 정산 진행`} role="region" className="gap-3 py-4 sm:gap-3 sm:py-4">
+      <CardContent className="flex flex-col gap-3 sm:px-5">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-sm font-semibold text-muted-foreground">진행</span>
+          <span className="text-sm tabular-nums">
+            <span className="font-semibold">{progress.done}</span>
+            <span className="text-muted-foreground"> / {progress.total} 확인</span>
+          </span>
+        </div>
+        <Progress value={percentOf(progress.done, progress.total)} tone={complete ? "brand" : "ink"} aria-hidden />
+        {remaining > 0 && onNext && (
+          <Button variant="outline" onClick={onNext} className="w-full justify-between">
+            <span>
+              미확인 <span className="tabular-nums">{remaining}건</span>
+            </span>
+            <span className="flex items-center gap-1">
+              다음 미확인
+              <ArrowDown aria-hidden />
+            </span>
+          </Button>
+        )}
+        {closable ? (
+          <>
+            {overspendNotice && <p className="text-caption text-warning-foreground">소비가 계획 대비 {POCKET_OVERSPEND_PERCENT}%를 넘은 주머니가 있어요. 결과를 확인해 주세요.</p>}
+            <Button size="lg" className="w-full" disabled={!canCloseNow} onClick={onClose}>
+              {label} 마감
+            </Button>
+            <p className="text-caption text-muted-foreground">{closeReason ?? "마감하면 결과가 확정되고 다음 달이 열립니다."}</p>
+          </>
+        ) : (
+          blocker && (
+            <>
+              <p className="text-caption text-muted-foreground">{formatMonthOnly(blocker)}을 먼저 마감하세요.</p>
+              <Button variant="secondary" className="w-full" onClick={onGoBlocker}>
+                {formatMonthOnly(blocker)}로
+              </Button>
+            </>
+          )
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

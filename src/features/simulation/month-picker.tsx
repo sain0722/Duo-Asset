@@ -15,8 +15,10 @@ type MonthPickerProps = {
 export function MonthPicker({ value, onChange, ...aria }: MonthPickerProps) {
   const { year, month } = ymParts(value);
   const thisYear = ymParts(currentYm()).year;
-  const years = Array.from({ length: 46 }, (_, i) => thisYear - 5 + i);
-  if (!years.includes(year)) years.unshift(year);
+  // 미래를 고르는 선택이라 올해부터 보여 준다. 이미 저장된 값이 범위 밖이면 그 연도만 더한다.
+  const years = Array.from({ length: 41 }, (_, i) => thisYear + i);
+  if (year < thisYear) years.unshift(year);
+  else if (!years.includes(year)) years.push(year);
   const set = (y: number, m: number) => onChange(`${y}-${String(m).padStart(2, "0")}`);
 
   return (

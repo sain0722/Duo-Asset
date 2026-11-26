@@ -127,7 +127,7 @@ export function UpcomingCard({ data, upcoming, className }: { data: HouseholdDat
                 <Progress value={goal.percent} aria-label={`${goal.name} 달성률`} />
                 <p className="flex justify-between gap-3 text-caption text-muted-foreground">
                   <span>
-                    남은 금액 <Money amount={goal.remaining} compact />
+                    남은 금액 <Money amount={goal.remaining} />
                   </span>
                   {goal.expectedMonth && <span>{formatYm(goal.expectedMonth)} 예상</span>}
                 </p>

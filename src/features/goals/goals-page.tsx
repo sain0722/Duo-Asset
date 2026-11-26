@@ -12,10 +12,9 @@ import { SECTION_TABS } from "@/components/shell/nav";
 import { Stat } from "@/components/stat";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { currentPosition, goalsView } from "@/lib/data/derive";
+import { basisText, currentPosition, goalsView, positionView } from "@/lib/data/derive";
 import { useHousehold } from "@/lib/data/hooks";
 import type { Goal } from "@/lib/finance/types";
-import { formatYm } from "@/lib/format";
 import { currentYm } from "@/lib/month";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +35,7 @@ export function GoalsPage() {
   const data = useHousehold();
   const view = goalsView(data, currentYm());
   const position = currentPosition(data);
+  const basis = positionView(data)?.basis;
   // 닫히는 동안에도 내용이 바뀌지 않도록 대상은 남겨 두고, 열 때마다 폼을 새로 시작한다(key)
   const [dialog, setDialog] = useState<{ open: boolean; key: number; target: DialogTarget }>({
     open: false,
@@ -72,11 +72,12 @@ export function GoalsPage() {
             label="여유 가용자산"
             info={
               <InfoTip title="여유 가용자산">
-                목표 배정 후 여유 가용자산 = 가용자산 − 가용자산에 걸린 목표 배정액. 목표를 만들어도 총자산은 변하지 않습니다.
+                여유 가용자산 = 가용자산 − 가용자산 중 목표 몫. 목표에 배정하지 않고 남은 가용자산입니다. 목표를 만들어도
+                총자산은 변하지 않습니다.
               </InfoTip>
             }
             value={<Money amount={view.freeLiquid} />}
-            sub={position.asOf && <>{formatYm(position.asOf)} 말 잔액 기준</>}
+            sub={basis && basisText(basis)}
           />
           <dl className="grid gap-2.5 border-t pt-4 text-sm sm:grid-cols-2 sm:gap-6">
             <div className="flex items-center justify-between gap-3 sm:flex-col sm:items-start sm:gap-1">
@@ -90,14 +91,15 @@ export function GoalsPage() {
             </div>
             <div className="flex items-center justify-between gap-3 sm:flex-col sm:items-start sm:gap-1">
               <dt className="flex items-center gap-1 text-muted-foreground">
-                목표에 묶인 돈
-                <InfoTip title="목표 배정액">
-                  가용자산 중 목표에 배정한 금액입니다. 한 자산을 여러 목표에 연결해도 위에 있는 목표부터 자산의 남은
-                  평가금액 안에서만 배정하므로 합계가 평가금액을 넘지 않습니다.
+                가용자산 중 목표 몫
+                <InfoTip title="가용자산 중 목표 몫">
+                  가용자산(즉시 사용 가능한 자산) 중 목표에 배정한 금액입니다. 가용자산에서 이 금액을 뺀 값이 여유
+                  가용자산입니다. 즉시 사용할 수 없는 자산에 배정한 금액은 들어가지 않습니다. 한 자산을 여러 목표에
+                  연결해도 위에 있는 목표부터 자산의 남은 평가금액 안에서만 배정하므로 합계가 평가금액을 넘지 않습니다.
                 </InfoTip>
               </dt>
               <dd className="font-semibold sm:text-lg">
-                <Money amount={view.allocatedLiquid === 0 ? 0 : -view.allocatedLiquid} />
+                <Money amount={view.allocatedLiquid} />
               </dd>
             </div>
           </dl>

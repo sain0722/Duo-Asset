@@ -51,12 +51,18 @@ export function checklist(report: MonthReport, pocketOrder: PocketId[] = []): Ch
     items.push({
       section: "transfers",
       rowId: rowIdOf("contribution", line.key),
-      label: `${line.name} 입금`,
+      label: contributionLabel(report, line.pocket, line.name),
       pocket: line.pocket,
       done: line.actual !== null,
     });
   }
   return items;
+}
+
+/** 공용통장 입금 줄의 이름. 정산 화면 본문과 같은 "하늘 → 공용통장" 형식 */
+export function contributionLabel(report: Pick<MonthReport, "pockets">, pocket: PocketId, fallback: string): string {
+  const name = report.pockets.find((p) => p.pocket === pocket)?.name;
+  return name ? `${name} → 공용통장` : fallback;
 }
 
 export function rowIdOf(kind: "income" | "asset" | "liability" | "contribution" | "expense", key: string): string {
@@ -129,6 +135,47 @@ export function pocketUsage(pocket: { consumption: Won; plannedConsumption: Won 
   return percentOf(pocket.consumption, pocket.plannedConsumption);
 }
 
+// ───────────────────────── 입력 실수 안내 ─────────────────────────
+// 소비는 잔액 차이로 역산되므로 자릿수 실수가 그대로 결과를 틀어 놓는다. 마감은 막지 않고 한 번 더 보게만 한다.
+
+/** 이 금액보다 작은 변화는 안내하지 않는다 (잔액이 작은 통장의 흔한 변동) */
+export const SUSPICIOUS_MIN_CHANGE: Won = 1_000_000;
+/** 주머니 소비가 계획의 이 비율(%)을 넘으면 마감 전에 안내한다 */
+export const POCKET_OVERSPEND_PERCENT = 200;
+/** 잔액이 월초의 이 배수만큼 달라지면 자릿수 실수를 의심한다 */
+export const BALANCE_JUMP_RATIO = 5;
+
+export type BalanceJump = "drop" | "rise";
+
+/**
+ * 확인한 잔액이 월초보다 크게 달라졌는가 (자릿수 실수 의심).
+ * 자릿수를 하나 빠뜨리거나 더 넣으면 값이 약 1/10 · 10배가 된다. 그 주변(1/5 미만, 5배 이상)이고
+ * 차이가 SUSPICIOUS_MIN_CHANGE 이상일 때만 알린다 — 입출금 통장 잔액이 절반쯤 오르내리는 것은 흔한 일이라 알리지 않는다.
+ * 0 (해지·매각·완납) 은 의도한 값으로 본다.
+ */
+export function balanceJump(open: Won, value: Won): BalanceJump | null {
+  if (open <= 0 || value <= 0) return null;
+  if (Math.abs(value - open) < SUSPICIOUS_MIN_CHANGE) return null;
+  if (value * BALANCE_JUMP_RATIO < open) return "drop";
+  if (value >= open * BALANCE_JUMP_RATIO) return "rise";
+  return null;
+}
+
+export const BALANCE_JUMP_HINT: Record<BalanceJump, string> = {
+  drop: "전월보다 크게 줄었어요. 자릿수를 확인해 주세요.",
+  rise: "전월보다 크게 늘었어요. 자릿수를 확인해 주세요.",
+};
+
+/** 계획 대비 소비가 POCKET_OVERSPEND_PERCENT 를 넘은 주머니 (정산이 끝난 결과에서만 의미가 있다) */
+export function overspentPockets(report: Pick<MonthReport, "complete" | "isBaseline" | "pockets">): { pocket: PocketId; name: string; usage: number }[] {
+  if (!report.complete || report.isBaseline) return [];
+  return report.pockets.flatMap((pocket) => {
+    if (pocket.plannedConsumption <= 0) return [];
+    const usage = pocketUsage(pocket);
+    return usage !== null && usage > POCKET_OVERSPEND_PERCENT ? [{ pocket: pocket.pocket, name: pocket.name, usage }] : [];
+  });
+}
+
 /** 미확인 항목 경고는 확인 목록으로 따로 보여 주므로, 결과 영역에는 나머지 경고만 */
 export function resultWarnings(report: MonthReport) {
   return report.warnings.filter((warning) => !warning.code.startsWith("unconfirmed_"));
@@ -152,14 +199,14 @@ export interface SuggestionRow {
 }
 
 /** suggestInputs 결과를 확인 창의 줄로 바꾼다. 화면 순서(수입 → 자산 → 부채 → 납입)대로. */
-export function suggestionRows(suggested: SuggestedInputs, report: Pick<MonthReport, "liabilityLines">): SuggestionRow[] {
+export function suggestionRows(suggested: SuggestedInputs, report: Pick<MonthReport, "liabilityLines" | "pockets">): SuggestionRow[] {
   const income = suggested.entries.filter((entry) => entry.kind === "income");
   const contributions = suggested.entries.filter((entry) => entry.kind === "contribution");
   const entryRow = (entry: SuggestedInputs["entries"][number]): SuggestionRow => ({
     pendingKey: `${entry.kind}:${entry.planItemId}`,
     section: entry.kind === "income" ? "income" : "transfers",
     rowId: rowIdOf(entry.kind, entry.planItemId),
-    name: entry.kind === "income" ? entry.name : `${entry.name} 입금`,
+    name: entry.kind === "income" ? entry.name : contributionLabel(report, entry.pocket, entry.name),
     amount: entry.amount,
     extra: null,
     extraLabel: null,

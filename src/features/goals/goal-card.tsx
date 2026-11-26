@@ -103,7 +103,7 @@ export function GoalCard({ goal, progress, earlier, isFirst, isLast, assetValues
           <p className="flex flex-wrap items-baseline gap-x-2">
             <Money amount={progress.current} className="num-display text-2xl font-bold" />
             <span className="text-sm text-muted-foreground">
-              / <Money amount={progress.target} compact />
+              / <Money amount={progress.target} />
             </span>
           </p>
           <Progress value={progress.percent} aria-label={`${goal.name} 달성률`} />
@@ -111,7 +111,7 @@ export function GoalCard({ goal, progress, earlier, isFirst, isLast, assetValues
             <span className="font-semibold text-brand tabular-nums">{formatPercent(progress.percent)}</span>
             {!progress.achieved && (
               <span className="text-muted-foreground">
-                남은 금액 <Money amount={progress.remaining} compact className="font-medium text-foreground" />
+                남은 금액 <Money amount={progress.remaining} className="font-medium text-foreground" />
               </span>
             )}
           </p>
@@ -127,7 +127,7 @@ export function GoalCard({ goal, progress, earlier, isFirst, isLast, assetValues
                   <span className="text-warning-foreground">이번 달이 목표일입니다</span>
                 ) : progress.requiredMonthly !== null ? (
                   <span className="inline-flex items-center gap-1">
-                    월 <Money amount={progress.requiredMonthly} compact className="font-semibold" /> 필요
+                    월 <Money amount={progress.requiredMonthly} className="font-semibold" /> 필요
                     <InfoTip title="목표일까지 필요한 월 적립액">
                       남은 금액을 목표일까지 남은 개월 수로 나눈 금액입니다(올림).
                     </InfoTip>
@@ -156,7 +156,7 @@ export function GoalCard({ goal, progress, earlier, isFirst, isLast, assetValues
             </Row>
             {goal.monthly_contribution !== null && goal.basis !== "net_worth" && goal.basis !== "financial_assets" && (
               <Row label="월 적립 계획">
-                <Money amount={goal.monthly_contribution} compact />
+                <Money amount={goal.monthly_contribution} />
               </Row>
             )}
           </dl>
@@ -178,17 +178,17 @@ export function GoalCard({ goal, progress, earlier, isFirst, isLast, assetValues
                   <li key={allocation.assetId} className="flex items-baseline justify-between gap-3">
                     <span className="min-w-0 truncate">{assetName(allocation.assetId)}</span>
                     <span className="shrink-0 text-right">
-                      <Money amount={allocation.allocated} compact className="font-semibold" />
+                      <Money amount={allocation.allocated} className="font-semibold" />
                       <span className="ml-1.5 text-caption text-muted-foreground">
                         {allocation.requested === null ? (
                           "필요한 만큼"
                         ) : allocation.requested !== allocation.allocated ? (
                           <>
-                            요청 <Money amount={allocation.requested} compact />
+                            요청 <Money amount={allocation.requested} />
                           </>
                         ) : (
                           <>
-                            / <Money amount={assetValues[allocation.assetId] ?? 0} compact />
+                            / <Money amount={assetValues[allocation.assetId] ?? 0} />
                           </>
                         )}
                       </span>
@@ -202,7 +202,7 @@ export function GoalCard({ goal, progress, earlier, isFirst, isLast, assetValues
                 <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
                 <span>
                   {sharedWithEarlier ? "다른 목표에 먼저 배정되어" : "자산 평가금액이 요청보다 적어"}{" "}
-                  <Money amount={progress.shortfall} compact className="font-semibold" /> 부족
+                  <Money amount={progress.shortfall} className="font-semibold" /> 부족
                 </span>
               </p>
             )}
@@ -247,7 +247,7 @@ export function ArchivedGoalRow({ goal }: { goal: Goal }) {
       <div className="min-w-0">
         <p className="truncate text-body font-medium">{goal.name}</p>
         <p className="text-caption text-muted-foreground">
-          목표 <Money amount={goal.target_amount} compact />
+          목표 <Money amount={goal.target_amount} />
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-1">

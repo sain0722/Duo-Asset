@@ -44,7 +44,7 @@ export function NetWorthHero({ hero, freeLiquid, className }: { hero: HeroView; 
             sub={
               showFree && (
                 <>
-                  목표 배정 후 <Money amount={freeLiquid} compact className="font-medium text-foreground" />
+                  여유 가용자산 <Money amount={freeLiquid} className="font-medium text-foreground" />
                 </>
               )
             }

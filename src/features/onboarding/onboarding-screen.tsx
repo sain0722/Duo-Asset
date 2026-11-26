@@ -191,7 +191,7 @@ function CreateHouseholdForm({ className }: { className?: string }) {
         <FormField
           label="배우자 로그인 이메일"
           optional
-          description="배우자가 이 이메일 계정으로 로그인하면 자동으로 연결됩니다. 계정은 Supabase 대시보드에서 따로 만들어야 합니다. 나중에 설정에서 등록해도 됩니다."
+          description="배우자가 이 이메일 계정으로 로그인하면 자동으로 연결됩니다. 배우자 계정은 관리자가 따로 발급해야 합니다. 나중에 설정에서 등록해도 됩니다."
           error={errors.partnerEmail}
         >
           {(control) => (

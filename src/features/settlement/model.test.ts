@@ -5,10 +5,12 @@ import { actual, asset, assetSnap, liability, liabilitySnap, member, monthInput,
 
 import {
   assetValueChange,
+  balanceJump,
   balanceWithPlannedSaving,
   checklist,
   planComparison,
   plannedEntryInputs,
+  overspentPockets,
   plannedSavingsByAsset,
   pocketUsage,
   principalAfter,
@@ -196,7 +198,9 @@ describe("예정대로 한 번에 확인", () => {
     ]);
     // 통장·투자자산은 직접 확인해야 하므로 들어 있지 않다
     expect(rows.some((row) => row.section === "assets" && row.amount === 1_000_000)).toBe(false);
-    expect(rows.at(-1)!.name).toMatch(/입금$/);
+    // 본문과 같은 "이름 → 공용통장" 형식 ("공용통장 입금 입금" 이 되지 않게)
+    expect(rows.at(-1)!.name).toBe(`${r.pockets.find((p) => p.pocket === r.contributionLines[0].pocket)!.name} → 공용통장`);
+    expect(checklist(r).find((item) => item.section === "transfers")!.label).toBe(rows.at(-1)!.name);
   });
 
   it("한 번에 확인한 뒤 남는 항목은 통장·투자자산처럼 직접 볼 것뿐이다", () => {
@@ -233,5 +237,36 @@ describe("예정대로 한 번에 확인", () => {
     expect(plannedEntryInputs("income", r.incomeLines, r.planLines)).toEqual([
       { kind: "income", member_id: f.b.id, plan_item_id: bonus.id, name: bonus.name, amount: 500_000 },
     ]);
+  });
+});
+
+describe("입력 실수 안내", () => {
+  it("잔액이 1/5 아래로 줄거나 5배 이상 늘면 알린다 (자릿수 실수)", () => {
+    expect(balanceJump(11_400_000, 1_267_000)).toBe("drop"); // 0 하나를 빠뜨렸다
+    expect(balanceJump(20_892_000, 1_000_000)).toBe("drop");
+    expect(balanceJump(1_200_000, 12_000_000)).toBe("rise"); // 0 하나를 더 넣었다
+    expect(balanceJump(1_200_000, 11_500_000)).toBe("rise"); // 실제 잔액이 조금 줄었어도 잡힌다
+  });
+
+  it("흔한 변동·작은 금액·0(해지)·새 자산은 알리지 않는다", () => {
+    expect(balanceJump(3_980_000, 1_500_000)).toBeNull(); // 입출금 통장이 절반 아래로 줄어드는 것은 흔하다
+    expect(balanceJump(5_000_000, 1_000_000)).toBeNull(); // 정확히 1/5
+    expect(balanceJump(1_500_000, 600_000)).toBeNull(); // 차이가 100만 원 미만
+    expect(balanceJump(100_000, 900_000)).toBeNull(); // 9배지만 차이가 작다
+    expect(balanceJump(5_000_000, 0)).toBeNull();
+    expect(balanceJump(0, 5_000_000)).toBeNull();
+    expect(balanceJump(1_000_000, 4_999_999)).toBeNull(); // 5배 미만
+  });
+
+  it("주머니 소비가 계획의 200%를 넘으면 그 주머니를 돌려준다", () => {
+    const pocket = (name: string, consumption: number, plannedConsumption: number) => ({ pocket: name, name, consumption, plannedConsumption });
+    const report = {
+      complete: true,
+      isBaseline: false,
+      pockets: [pocket("가", 3_610_000, 800_000), pocket("나", 1_600_000, 800_000), pocket("다", 2_000_000, 1_000_000), pocket("공동", 500_000, 0)],
+    } as unknown as Parameters<typeof overspentPockets>[0];
+    expect(overspentPockets(report)).toEqual([{ pocket: "가", name: "가", usage: 451.3 }]);
+    // "나"(200%) 는 넘은 것이 아니고, 계획이 0 인 공동은 비율이 없다. 정산 전이면 알리지 않는다
+    expect(overspentPockets({ ...report, complete: false })).toEqual([]);
   });
 });

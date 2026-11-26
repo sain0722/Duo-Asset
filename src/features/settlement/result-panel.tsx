@@ -105,7 +105,7 @@ export function ResultBody({
         <div className="flex flex-col gap-5">
           <Stat
             size="lg"
-            label="저축액"
+            label="실제 저축액"
             info={<MetricTip id="savings" />}
             value={<Money amount={report.savings} />}
             sub={
@@ -116,7 +116,7 @@ export function ResultBody({
                 </span>
                 {achievement !== null && (
                   <span className="flex items-center gap-1">
-                    · 계획의 <span className="font-semibold text-brand tabular-nums">{formatPercent(achievement)}</span>
+                    · 계획 대비 <span className="font-semibold text-brand tabular-nums">{formatPercent(achievement)}</span>
                     <MetricTip id="achievement" />
                   </span>
                 )}

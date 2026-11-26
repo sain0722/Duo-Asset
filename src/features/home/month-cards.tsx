@@ -79,7 +79,7 @@ export function PlanCard({ data, plan, className }: { data: HouseholdData; plan:
       <CardContent className="flex flex-col gap-5">
         <div className="grid grid-cols-2 gap-4">
           <Stat label="합산 월수입" info={<PlanIncomeTip />} value={<Money amount={plan.totals.income} compact />} />
-          <Stat label="예상 저축액" info={<PlanSavingsTip />} value={<Money amount={plan.totals.savings} compact />} />
+          <Stat label="계획 저축액" info={<PlanSavingsTip />} value={<Money amount={plan.totals.savings} compact />} />
         </div>
         <Separator />
         <dl className="flex flex-col gap-2.5">
@@ -93,7 +93,7 @@ export function PlanCard({ data, plan, className }: { data: HouseholdData; plan:
               label={<PocketBadge tone={pocketTone(data, member.memberId)} className="text-foreground">{pocketName(data, member.memberId)}</PocketBadge>}
             >
               {member.allowance < 0 && <Badge variant="warning">초과 배분</Badge>}
-              <Money amount={member.allowance} />
+              <Money amount={member.allowance} compact />
             </Row>
           ))}
           <Separator className="my-1" />
@@ -101,7 +101,7 @@ export function PlanCard({ data, plan, className }: { data: HouseholdData; plan:
             label={<PocketBadge tone="joint" className="text-foreground">공동생활비 예산</PocketBadge>}
             info={<JointBudgetTip />}
           >
-            <Money amount={plannedJointConsumption(plan.joint)} />
+            <Money amount={plannedJointConsumption(plan.joint)} compact />
           </Row>
         </dl>
       </CardContent>
@@ -154,7 +154,7 @@ export function ResultCard({ result, className }: { result: SettlementResult | n
               <AchievementTip />
             </span>
             <span className="font-semibold text-brand tabular-nums">
-              {achievement === null ? "계획 저축 없음" : formatPercent(achievement)}
+              {achievement === null ? "계획 저축액 없음" : formatPercent(achievement)}
             </span>
           </div>
         </div>

@@ -124,11 +124,11 @@ function SummaryCard({ plan }: { plan: MonthPlan }) {
       label: "계획 소비",
       amount: totals.consumption,
       className: SEGMENT_COLORS.spend,
-      info: "개인 고정지출, 대출 이자, 개인 사용 가능 금액(음수는 0), 공동지출의 합입니다. 개인 사용 가능 금액은 쓰는 돈으로 봅니다. 쓰고 남기면 실제 저축이 계획을 넘습니다.",
+      info: "개인 고정지출, 대출 이자, 개인 사용 가능 금액(음수는 0), 공동지출의 합입니다. 개인 사용 가능 금액은 쓰는 돈으로 봅니다. 쓰고 남기면 실제 저축액이 계획 저축액을 넘습니다.",
     },
     {
       key: "savings",
-      label: "계획 저축",
+      label: "계획 저축액",
       amount: totals.savings,
       className: SEGMENT_COLORS.saving,
       info: "수입 − 계획 소비 − 계획 원금상환입니다. 개인 저축 항목과 공동저축이 여기에 들어갑니다.",
@@ -158,7 +158,7 @@ function SummaryCard({ plan }: { plan: MonthPlan }) {
         />
         <div className="flex flex-col gap-4">
           <AllocationBar
-            label="수입 = 계획 소비 + 계획 저축 + 원금 상환"
+            label="수입 = 계획 소비 + 계획 저축액 + 원금 상환"
             segments={parts.map(({ key, label, amount, className }) => ({ key, label, amount, className }))}
             className="h-3"
           />

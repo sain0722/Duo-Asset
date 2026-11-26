@@ -32,6 +32,10 @@ export function ClosedMonthView({ data, month, report }: { data: HouseholdData; 
   }
 
   const pockets: PocketId[] = [...data.members.map((member) => member.id), JOINT];
+  // 이자·지급액은 부채 줄에 함께 보여 주므로 지출에는 직접 확인한 지출 항목만
+  const expenseLines = report.isBaseline
+    ? []
+    : report.pockets.flatMap((pocket) => pocket.expenseLines).filter((line) => line.actual !== null && !line.key.startsWith("liability:"));
 
   return (
     <div className="flex flex-col gap-4 sm:gap-5">
@@ -62,7 +66,7 @@ export function ClosedMonthView({ data, month, report }: { data: HouseholdData; 
         <CardHeader>
           <CardTitle>이 달의 기록</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-6 lg:grid-cols-2 lg:gap-10">
+        <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-2 lg:gap-10">
           {!report.isBaseline && (
             <RecordGroup title="수입·이동">
               {report.incomeLines.map((line) => (
@@ -81,6 +85,13 @@ export function ClosedMonthView({ data, month, report }: { data: HouseholdData; 
                   label={`${pocketName(data, line.from)} → ${pocketName(data, line.to)}`}
                   amount={<Money amount={line.amount} />}
                 />
+              ))}
+            </RecordGroup>
+          )}
+          {expenseLines.length > 0 && (
+            <RecordGroup title="지출">
+              {expenseLines.map((line) => (
+                <RecordRow key={line.key} label={line.name} badge={<Pocket data={data} pocket={line.pocket} />} amount={<Money amount={line.actual} />} />
               ))}
             </RecordGroup>
           )}
@@ -111,6 +122,11 @@ export function ClosedMonthView({ data, month, report }: { data: HouseholdData; 
                   <span className="flex flex-col items-end">
                     <Money amount={line.balance} />
                     {!report.isBaseline && <Delta amount={liabilityChange(line)} compact className="text-caption" />}
+                    {!report.isBaseline && line.interestPaid !== null && (
+                      <span className="text-caption font-normal text-muted-foreground">
+                        {line.kind === "interest_only" ? "지급액" : "이자"} <Money amount={line.interestPaid} />
+                      </span>
+                    )}
                   </span>
                 }
               />
@@ -142,7 +158,7 @@ function Pocket({ data, pocket }: { data: HouseholdData; pocket: PocketId }) {
 
 function RecordGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section aria-label={title}>
+    <section aria-label={title} className="min-w-0">
       <h4 className="mb-1 text-sm font-semibold">{title}</h4>
       <ul className="divide-y">{children}</ul>
     </section>
@@ -152,7 +168,7 @@ function RecordGroup({ title, children }: { title: string; children: React.React
 function RecordRow({ label, badge, amount }: { label: string; badge?: React.ReactNode; amount: React.ReactNode }) {
   return (
     <li className="flex min-h-12 items-center justify-between gap-3 py-2.5">
-      <span className="min-w-0">
+      <span className="min-w-0 flex-1">
         <span className="block truncate text-body">{label}</span>
         {badge}
       </span>

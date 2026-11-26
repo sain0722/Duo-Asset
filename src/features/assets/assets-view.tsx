@@ -103,11 +103,13 @@ export function AssetsView() {
                   value={<Money amount={position.totals.assets} />}
                   sub={
                     <>
-                      {view && <span>{basisText(view.basis)}</span>}
+                      {/* 기준 표기는 한 줄을 차지하고, 증감은 다음 줄에 (홈과 같은 표기) */}
+                      {view && <span className="w-full">{basisText(view.basis)}</span>}
                       {change && (
-                        <span>
-                          · {formatMonthOnly(change.since)} 말보다 <Delta amount={change.amount} />
-                        </span>
+                        <>
+                          <span>{formatMonthOnly(change.since)} 말보다</span>
+                          <Delta amount={change.amount} />
+                        </>
                       )}
                     </>
                   }

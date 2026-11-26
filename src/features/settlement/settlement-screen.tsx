@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useState } from "react";
 
 import { EmptyState } from "@/components/empty-state";
 import { MonthSwitcher } from "@/components/month-switcher";
@@ -26,6 +27,8 @@ export function SettlementScreen() {
   const fallback = workingMonth(data) ?? latestMonth(data);
   const month = (param && isYm(param) && findMonth(data, param)) || fallback;
   const select = (ym: Ym) => router.replace(`${pathname}?month=${ym}`);
+  // PC 왼쪽 열: 이력 아래에 열린 달의 진행·마감 카드를 붙인다 (OpenMonthView 가 채운다)
+  const [progressSlot, setProgressSlot] = useState<HTMLDivElement | null>(null);
 
   const header = <PageHeader title="월 정산" description="잔액과 수입만 확인하면 소비·저축이 계산됩니다." />;
 
@@ -60,14 +63,17 @@ export function SettlementScreen() {
     <PageContainer>
       {header}
       <div className="grid gap-4 sm:gap-5 lg:grid-cols-[17rem_minmax(0,1fr)] lg:items-start lg:gap-6">
-        <aside aria-label="정산 이력" className="hidden lg:sticky lg:top-8 lg:block">
-          <Card className="gap-2 py-3 sm:gap-2 sm:py-3">
-            <h2 className="px-5 pt-1 text-sm font-semibold text-muted-foreground">정산 이력</h2>
-            <div className="px-2">
-              <MonthHistory data={data} selected={month.month} onSelect={select} />
-            </div>
-          </Card>
-        </aside>
+        <div className="hidden lg:flex lg:flex-col lg:gap-4 lg:self-stretch">
+          <aside aria-label="정산 이력">
+            <Card className="gap-2 py-3 sm:gap-2 sm:py-3">
+              <h2 className="px-5 pt-1 text-sm font-semibold text-muted-foreground">정산 이력</h2>
+              <div className="px-2">
+                <MonthHistory data={data} selected={month.month} onSelect={select} />
+              </div>
+            </Card>
+          </aside>
+          <div ref={setProgressSlot} className="lg:sticky lg:top-8" />
+        </div>
 
         <div className="flex min-w-0 flex-col gap-4 sm:gap-5">
           <div className="flex items-center justify-between gap-3">
@@ -80,7 +86,7 @@ export function SettlementScreen() {
           {month.status === "closed" ? (
             <ClosedMonthView key={month.id} data={data} month={month} report={report} />
           ) : (
-            <OpenMonthView key={month.id} data={data} month={month} report={report} onSelectMonth={select} />
+            <OpenMonthView key={month.id} data={data} month={month} report={report} onSelectMonth={select} desktopSlot={progressSlot} />
           )}
         </div>
       </div>

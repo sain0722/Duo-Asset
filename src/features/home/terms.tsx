@@ -12,8 +12,8 @@ export const LiabilitiesTip = () => <InfoTip title="총부채">부채 남은 원
 
 export const LiquidTip = () => (
   <InfoTip title="가용자산">
-    유동성이 &lsquo;즉시 사용 가능&rsquo;인 자산의 합입니다. 목표 배정 후 여유는 가용자산에서 가용자산에 걸린 목표
-    배정액을 뺀 금액입니다.
+    유동성이 &lsquo;즉시 사용 가능&rsquo;인 자산의 합입니다. 여유 가용자산 = 가용자산 − 가용자산 중 목표 몫(목표에
+    배정한 금액).
   </InfoTip>
 );
 
@@ -24,8 +24,8 @@ export const PlanIncomeTip = () => (
 );
 
 export const PlanSavingsTip = () => (
-  <InfoTip title="예상 저축액">
-    계획 저축 = 수입 − 계획 소비 − 계획 원금상환. 개인 사용 가능 금액은 모두 쓰는 돈으로 봅니다.
+  <InfoTip title="계획 저축액">
+    계획 저축액 = 수입 − 계획 소비 − 계획 원금상환. 개인 사용 가능 금액은 모두 쓰는 돈으로 봅니다.
   </InfoTip>
 );
 
@@ -42,8 +42,8 @@ export const JointBudgetTip = () => (
 );
 
 export const SavingsTip = () => (
-  <InfoTip title="저축액">
-    수입 − 소비지출 − 원금 상환액 = Σ자산 순투입 − 신규 차입. 투자 평가손익은 포함하지 않습니다.
+  <InfoTip title="실제 저축액">
+    마감한 달의 저축액 = 수입 − 소비지출 − 원금 상환액 = Σ자산 순투입 − 신규 차입. 투자 평가손익은 포함하지 않습니다.
   </InfoTip>
 );
 

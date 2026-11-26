@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -15,7 +15,7 @@ import type { LiabilityLine, Won } from "@/lib/finance/types";
 import { formatNumber } from "@/lib/format";
 
 import { clearLiabilityLine, saveInputs, saveLiabilityLine } from "./actions";
-import { liabilityChange, progressOf, rowIdOf, scheduledBalance } from "./model";
+import { BALANCE_JUMP_HINT, balanceJump, liabilityChange, progressOf, rowIdOf, scheduledBalance } from "./model";
 import { useOpenMonth } from "./month-context";
 import { ConfirmedValue, EditGroup, InputWithQuick, PendingMark, QuickButton, Row, RowActions, RowHead } from "./rows";
 import { useSaver } from "./save-status";
@@ -101,6 +101,9 @@ function LiabilityRow({ line }: { line: LiabilityLine }) {
   const liability = data.liabilities.find((l) => l.id === line.liabilityId);
   const snapshot = ctx.own.liabilitySnapshots.find((s) => s.liability_id === line.liabilityId);
 
+  // 자릿수 실수로 원금 상환·신규 차입이 크게 잡히는 것을 알려 준다 (막지는 않는다)
+  const jump = line.confirmed && !baseline ? balanceJump(line.openBalance, line.balance) : null;
+
   const [editing, setEditing] = useState(false);
   const [balance, setBalance] = useState<Won | null>(line.confirmed ? line.balance : null);
   const [interest, setInterest] = useState<Won | null>(line.interestPaid);
@@ -181,6 +184,12 @@ function LiabilityRow({ line }: { line: LiabilityLine }) {
               · 예정 <Money amount={line.plannedInterest} />
             </>
           )}
+        </p>
+      )}
+      {jump && !editing && (
+        <p className="mt-1 flex gap-1.5 text-caption font-medium text-warning-foreground">
+          <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+          {BALANCE_JUMP_HINT[jump]}
         </p>
       )}
       {(!line.confirmed || editing) && (
