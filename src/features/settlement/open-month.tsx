@@ -159,10 +159,10 @@ function OpenMonthInner({
       : null;
   // 계획이 없는 주머니는 위 안내가 나오지 않으므로, 크게 달라진 잔액도 마감 전에 한 번 더 알린다
   const jumpNotice =
-    jumps.length > 0 ? `${jumps.map((jump) => jump.name).join(", ")} 잔액이 전월보다 크게 달라졌어요. 자릿수를 확인해 주세요.` : null;
+    jumps.length > 0 ? `${jumps.map((jump) => jump.name).join(", ")} 금액이 전월보다 크게 달라졌어요. 자릿수를 확인해 주세요.` : null;
   const closeNotice = [jumpNotice, overspendNotice].filter(Boolean).join(" ") || null;
   const shortNotice = jumpNotice
-    ? "전월보다 크게 달라진 잔액이 있어요. 마감 전에 확인해 주세요."
+    ? "전월보다 크게 달라진 금액이 있어요. 마감 전에 확인해 주세요."
     : overspendNotice
       ? `소비가 계획 대비 ${POCKET_OVERSPEND_PERCENT}%를 넘은 주머니가 있어요. 결과를 확인해 주세요.`
       : null;
